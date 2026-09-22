@@ -18,6 +18,9 @@ import {
   Achievement,
   BestiaryEntry,
   CodexLoreEntry,
+  Faction,
+  NPCRelationship,
+  TutorialStep,
 } from "../types/game";
 
 export const STARTER_CHARACTERS: PlayableCharacter[] = [
@@ -755,6 +758,157 @@ export const INITIAL_CODEX: CodexLoreEntry[] = [
     content: "Astral Prisms do not originate from terrestrial mines. They condense from high-altitude aurora borealis events and can be used to attune weapons to legendary frequencies or forge pacts with wandering astral spirits.",
     unlocked: true,
     unlockedBy: "Unlocked Achievement System",
+  },
+];
+
+export const INITIAL_FACTIONS: Faction[] = [
+  {
+    id: "fac_astral_council",
+    name: "The Astral Researchers",
+    title: "Scholars of the Celestial Leylines",
+    description: "An ancient order of mystics and engineers dedicated to charting the resonance of the planetary ley network.",
+    philosophy: "Knowledge and harmonic balance are the twin keys to preventing celestial collapse.",
+    headquarters: "Starfall Observatory, Sunvale Heights",
+    leader: "High Arcanist Thalor",
+    reputation: 240,
+    standing: "Friendly",
+    bannerColor: "#38bdf8",
+    rewards: [
+      { standing: "Friendly", rewardDesc: "Access to Celestial Catalyst Blueprints", unlocked: true },
+      { standing: "Honored", rewardDesc: "Astral Compass Map Enhancements", unlocked: false },
+      { standing: "Exalted", rewardDesc: "Title: Herald of the Star-Spire & 500 Prisms", unlocked: false },
+    ],
+  },
+  {
+    id: "fac_gale_guardians",
+    name: "Keepers of the Gale",
+    title: "Vanguard Scouts of the Highland Plains",
+    description: "Nomadic wind-striders and glade rangers who protect the frontier settlements from mutated beasts.",
+    philosophy: "Freedom like the wandering storm, duty unwavering as mountain stone.",
+    headquarters: "Sunvale Haven Outpost",
+    leader: "Elder Thorne",
+    reputation: 450,
+    standing: "Friendly",
+    bannerColor: "#22c55e",
+    rewards: [
+      { standing: "Friendly", rewardDesc: "Stamina Regeneration Field Rations", unlocked: true },
+      { standing: "Honored", rewardDesc: "Zephyr Wing Glider Aerodynamic Mod", unlocked: false },
+      { standing: "Exalted", rewardDesc: "Legendary Gale Longbow & Title: Windrider", unlocked: false },
+    ],
+  },
+  {
+    id: "fac_smith_guild",
+    name: "Vanguard Ironforge Guild",
+    title: "Master Artisans of Resonant Alloys",
+    description: "Tough metallurgists who craft heavy armaments from volcanic basalt and crystallite seams.",
+    philosophy: "Tempered under fire, proven in the breach.",
+    headquarters: "The Great Foundry, Ignis Foothills",
+    leader: "Gerald the Smith",
+    reputation: 180,
+    standing: "Neutral",
+    bannerColor: "#f97316",
+    rewards: [
+      { standing: "Friendly", rewardDesc: "15% Discount on Weapon Refinement", unlocked: false },
+      { standing: "Honored", rewardDesc: "Volcanic Core Weapon Enhancement Recipes", unlocked: false },
+      { standing: "Exalted", rewardDesc: "Master Forgemaster Sigil & Molten Greatsword", unlocked: false },
+    ],
+  },
+];
+
+export const INITIAL_RELATIONSHIPS: NPCRelationship[] = [
+  {
+    npcId: "thorne",
+    affinity: 35,
+    level: "Acquaintance",
+    favoriteGifts: ["Ancient Aether Crystal", "Sunvale Goldpetal"],
+    unlockedLore: [
+      "Thorne was once a frontline champion during the Cataclysm before taking the mantle of village elder.",
+    ],
+  },
+  {
+    npcId: "seraphina",
+    affinity: 20,
+    level: "Acquaintance",
+    favoriteGifts: ["Sunvale Goldpetal", "Elixir of Vitality"],
+    unlockedLore: [
+      "Seraphina left the Astral Academy in the capital to search for a cure to leyline corruption in the wild glades.",
+    ],
+  },
+  {
+    npcId: "gerald",
+    affinity: 15,
+    level: "Stranger",
+    favoriteGifts: ["Ancient Aether Crystal"],
+    unlockedLore: [
+      "Gerald forged the original boundary bells that protect Sunvale Haven from wandering shadow beasts.",
+    ],
+  },
+];
+
+export const INITIAL_TUTORIAL_STEPS: TutorialStep[] = [
+  {
+    id: "tut_move",
+    stepNumber: 1,
+    title: "Movement & Locomotion",
+    instruction: "Use WASD or Arrow Keys to navigate the open world",
+    keyHint: "W A S D",
+    completed: false,
+  },
+  {
+    id: "tut_camera",
+    stepNumber: 2,
+    title: "Camera Control",
+    instruction: "Click and drag the mouse or use right-click to orbit your view",
+    keyHint: "Mouse Orbit",
+    completed: false,
+  },
+  {
+    id: "tut_attack",
+    stepNumber: 3,
+    title: "Combo Attack",
+    instruction: "Press [J] or click Attack on HUD to execute elemental blade strikes",
+    keyHint: "J / LMB",
+    completed: false,
+  },
+  {
+    id: "tut_dodge",
+    stepNumber: 4,
+    title: "Tactical Dodge",
+    instruction: "Press [Space] or [K] to dash with invulnerability frames",
+    keyHint: "Space / K",
+    completed: false,
+  },
+  {
+    id: "tut_skill",
+    stepNumber: 5,
+    title: "Elemental Skill",
+    instruction: "Press [E] or [Q] to cast your character's signature resonance ability",
+    keyHint: "E / Q",
+    completed: false,
+  },
+  {
+    id: "tut_switch",
+    stepNumber: 6,
+    title: "Quick Character Switch",
+    instruction: "Press [1], [2], or [3] to swap party members dynamically",
+    keyHint: "1 · 2 · 3",
+    completed: false,
+  },
+  {
+    id: "tut_interact",
+    stepNumber: 7,
+    title: "World Interaction",
+    instruction: "Approach NPCs, chests, or totems and press [F] to interact",
+    keyHint: "F",
+    completed: false,
+  },
+  {
+    id: "tut_map",
+    stepNumber: 8,
+    title: "Regional Cartography",
+    instruction: "Press [M] to open your Regional Map and fast-travel to waystones",
+    keyHint: "M",
+    completed: false,
   },
 ];
 

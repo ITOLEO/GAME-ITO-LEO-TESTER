@@ -86,7 +86,7 @@ export interface GameItem {
   name: string;
   description: string;
   type: ItemType;
-  category?: "weapon" | "armor" | "material" | "consumable";
+  category?: "weapon" | "armor" | "material" | "consumable" | "quest";
   rarity: ItemRarity;
   slot?: EquipmentSlot;
   weaponType?: WeaponType;
@@ -262,6 +262,53 @@ export interface GraphicsSettings {
   particles: boolean;
   screenShake: boolean;
   cameraSensitivity: number;
+}
+
+export interface Faction {
+  id: string;
+  name: string;
+  title: string;
+  description: string;
+  philosophy: string;
+  headquarters: string;
+  leader: string;
+  reputation: number;
+  standing: "Neutral" | "Friendly" | "Honored" | "Exalted";
+  rewards: { standing: string; rewardDesc: string; unlocked: boolean }[];
+  bannerColor: string;
+}
+
+export interface NPCRelationship {
+  npcId: string;
+  affinity: number;
+  level: "Stranger" | "Acquaintance" | "Confidant" | "Sworn Ally";
+  favoriteGifts: string[];
+  unlockedLore: string[];
+  giftsGiven?: number;
+}
+
+export type EmoteType = "wave" | "sit" | "dance" | "victory" | "bow" | "laugh";
+
+export interface TutorialStep {
+  id: string;
+  stepNumber: number;
+  title: string;
+  instruction: string;
+  keyHint: string;
+  completed: boolean;
+}
+
+export interface DebugStats {
+  fps: number;
+  frameTimeMs: number;
+  drawCalls: number;
+  triangles: number;
+  activeEnemies: number;
+  playerX: number;
+  playerY: number;
+  playerZ: number;
+  timeString: string;
+  weather: string;
 }
 
 export interface GameSaveState {

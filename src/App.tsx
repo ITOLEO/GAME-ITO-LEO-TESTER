@@ -15,6 +15,9 @@ import {
   INITIAL_ACHIEVEMENTS,
   INITIAL_BESTIARY,
   INITIAL_CODEX,
+  INITIAL_FACTIONS,
+  INITIAL_RELATIONSHIPS,
+  INITIAL_TUTORIAL_STEPS,
 } from "./game/initialData";
 import {
   PlayableCharacter,
@@ -31,6 +34,10 @@ import {
   Achievement,
   BestiaryEntry,
   CodexLoreEntry,
+  Faction,
+  NPCRelationship,
+  TutorialStep,
+  EmoteType,
 } from "./types/game";
 
 import { GameHUD } from "./components/GameHUD";
@@ -46,6 +53,9 @@ import { CharacterCreator } from "./components/CharacterCreator";
 import { ArchiveModal } from "./components/ArchiveModal";
 import { AchievementModal } from "./components/AchievementModal";
 import { ShopModal } from "./components/ShopModal";
+import { PhotoModeModal } from "./components/PhotoModeModal";
+import { DebugConsoleModal } from "./components/DebugConsoleModal";
+import { TutorialPrompt } from "./components/TutorialPrompt";
 
 export default function App() {
   const containerRef = useRef<HTMLDivElement>(null);
@@ -87,6 +97,20 @@ export default function App() {
     const saved = localStorage.getItem("aetheria_codex");
     return saved ? JSON.parse(saved) : INITIAL_CODEX;
   });
+
+  const [factions, setFactions] = useState<Faction[]>(() => {
+    const saved = localStorage.getItem("aetheria_factions");
+    return saved ? JSON.parse(saved) : INITIAL_FACTIONS;
+  });
+  const [relationships, setRelationships] = useState<NPCRelationship[]>(() => {
+    const saved = localStorage.getItem("aetheria_relationships");
+    return saved ? JSON.parse(saved) : INITIAL_RELATIONSHIPS;
+  });
+  const [tutorialSteps, setTutorialSteps] = useState<TutorialStep[]>(() => {
+    const saved = localStorage.getItem("aetheria_tutorials");
+    return saved ? JSON.parse(saved) : INITIAL_TUTORIAL_STEPS;
+  });
+  const [isTutorialMinimized, setIsTutorialMinimized] = useState(false);
 
   const [graphicsQuality, setGraphicsQuality] = useState<"Low" | "Medium" | "High" | "Ultra">("High");
   const [screenShake, setScreenShake] = useState(true);
@@ -147,7 +171,19 @@ export default function App() {
 
   // Active Modals & Dialogues
   const [activeModal, setActiveModal] = useState<
-    "character" | "inventory" | "quest" | "crafting" | "oracle" | "map" | "settings" | "archive" | "achievement" | "shop" | null
+    | "character"
+    | "inventory"
+    | "quest"
+    | "crafting"
+    | "oracle"
+    | "map"
+    | "settings"
+    | "archive"
+    | "achievement"
+    | "shop"
+    | "photo"
+    | "debug"
+    | null
   >(null);
   const [activeNPC, setActiveNPC] = useState<NPCData | null>(null);
   const [isCustomizing, setIsCustomizing] = useState<boolean>(() => {
@@ -368,6 +404,24 @@ export default function App() {
     return () => clearInterval(clockInterval);
   }, []);
 
+  // 2.5 Tutorial progression advancement
+  const advanceTutorialStep = useCallback((stepId: string) => {
+    setTutorialSteps((prev) => {
+      const stepIdx = prev.findIndex((s) => s.id === stepId && !s.completed);
+      if (stepIdx === -1) return prev;
+      const updated = prev.map((s, idx) => (idx === stepIdx ? { ...s, completed: true } : s));
+      localStorage.setItem("aetheria_tutorials", JSON.stringify(updated));
+      audio.playLevelUp();
+      addNotification(`Tutorial: ${prev[stepIdx].title} Complete!`, "quest");
+      if (updated.every((s) => s.completed)) {
+        setCurrency((c) => c + 200);
+        setAstralPrisms((p) => p + 50);
+        addNotification("Mastered Tutorial! Awarded +200 Shards & 50 Astral Prisms!", "level");
+      }
+      return updated;
+    });
+  }, [addNotification]);
+
   // 3. Switch Character
   const handleSwitchCharacter = (idx: number) => {
     if (idx < 0 || idx >= party.length) return;
@@ -376,6 +430,7 @@ export default function App() {
     if (engineRef.current) {
       engineRef.current.setCharacter(selected);
     }
+    advanceTutorialStep("tut_switch");
     audio.playFanfare();
     addNotification(`Resonance Shift: ${selected.name} (${selected.element})!`, "level");
   };
@@ -405,6 +460,7 @@ export default function App() {
       } else if (e.code === "KeyO") {
         setActiveModal((curr) => (curr === "oracle" ? null : "oracle"));
       } else if (e.code === "KeyM") {
+        advanceTutorialStep("tut_map");
         setActiveModal((curr) => (curr === "map" ? null : "map"));
       } else if (e.code === "KeyY") {
         setActiveModal((curr) => (curr === "archive" ? null : "archive"));
@@ -412,6 +468,10 @@ export default function App() {
         setActiveModal((curr) => (curr === "achievement" ? null : "achievement"));
       } else if (e.code === "KeyP") {
         setActiveModal((curr) => (curr === "shop" ? null : "shop"));
+      } else if (e.code === "KeyF") {
+        setActiveModal((curr) => (curr === "photo" ? null : "photo"));
+      } else if (e.code === "Backquote" || e.code === "F1") {
+        setActiveModal((curr) => (curr === "debug" ? null : "debug"));
       } else if (e.code === "Escape") {
         if (activeNPC) {
           setActiveNPC(null);
@@ -425,7 +485,7 @@ export default function App() {
 
     window.addEventListener("keydown", handleKeyDown);
     return () => window.removeEventListener("keydown", handleKeyDown);
-  }, [party, activeModal, activeNPC]);
+  }, [party, activeModal, activeNPC, advanceTutorialStep]);
 
   // 5. Progression Handlers
   const handleLevelUp = (charId: string) => {
@@ -525,6 +585,18 @@ export default function App() {
 
     audio.playFanfare();
     addNotification(`Equipped ${item.name} to ${active.name}!`, "item");
+  };
+
+  // Sell item handler
+  const handleSellItem = (item: GameItem, price: number) => {
+    setInventory((prev) =>
+      prev
+        .map((it) => (it.id === item.id ? { ...it, count: it.count - 1 } : it))
+        .filter((it) => it.count > 0 || it.type === "weapon" || it.type === "equipment")
+    );
+    setCurrency((c) => c + price);
+    audio.playCollectSound();
+    addNotification(`Sold ${item.name} for +${price} Shards!`, "item");
   };
 
   // 7. Crafting
@@ -774,8 +846,64 @@ export default function App() {
     addNotification(`Tier ${tierId} Claimed! (+1000 Shards & Materials)`, "quest");
   };
 
+
+  // Gift & Relationship Affinity Handler
+  const handleGiveGift = (npcId: string, item: GameItem) => {
+    setInventory((prev) =>
+      prev
+        .map((it) => (it.id === item.id ? { ...it, count: it.count - 1 } : it))
+        .filter((it) => it.count > 0 || it.type === "weapon" || it.type === "equipment")
+    );
+
+    setRelationships((prev) =>
+      prev.map((r) => {
+        if (r.npcId === npcId) {
+          const newAffinity = Math.min(100, r.affinity + 25);
+          let newLevel = r.level;
+          if (newAffinity >= 80) newLevel = "Sworn Ally";
+          else if (newAffinity >= 50) newLevel = "Confidant";
+          else if (newAffinity >= 25) newLevel = "Acquaintance";
+
+          return {
+            ...r,
+            affinity: newAffinity,
+            level: newLevel,
+            giftsGiven: (r.giftsGiven || 0) + 1,
+          };
+        }
+        return r;
+      })
+    );
+
+    setFactions((prev) =>
+      prev.map((f) => (f.id === "astral_researchers" ? { ...f, reputation: Math.min(1000, f.reputation + 40) } : f))
+    );
+
+    audio.playCollectSound();
+    addNotification(`Gifted ${item.name}! Affinity increased!`, "item");
+  };
+
+  // Find active tutorial step
+  const currentTutorialStep = tutorialSteps.find((s) => !s.completed) || null;
+  const currentTutorialIndex = tutorialSteps.findIndex((s) => !s.completed);
+  const isAllTutorialCompleted = tutorialSteps.every((s) => s.completed);
+
   // Active quest data
   const currentActiveQuest = quests.find((q) => q.id === activeQuestId) || quests[0] || null;
+
+  // Active quick consumable item
+  const quickConsumable =
+    inventory.find(
+      (i) => (i.category === "consumable" || i.type === ItemType.CONSUMABLE) && i.count > 0
+    ) || null;
+
+  const handleUseQuickConsumable = () => {
+    if (quickConsumable) {
+      handleUseItem(quickConsumable);
+    } else {
+      addNotification("No consumables in pouch!", "item");
+    }
+  };
 
   return (
     <div className="relative w-screen h-screen overflow-hidden bg-black select-none font-sans">
@@ -791,14 +919,32 @@ export default function App() {
         astralPrisms={astralPrisms}
         worldTime={worldTime}
         activeQuest={currentActiveQuest}
+        quickConsumable={quickConsumable}
+        onUseQuickConsumable={handleUseQuickConsumable}
         interactPrompt={interactPrompt}
-        onInteract={() => currentActionRef.current && currentActionRef.current()}
+        onInteract={() => {
+          if (currentActionRef.current) currentActionRef.current();
+          advanceTutorialStep("tut_interact");
+        }}
         onSwitchCharacter={handleSwitchCharacter}
-        onTriggerAttack={() => engineRef.current?.triggerAttack()}
-        onTriggerSkill={() => engineRef.current?.triggerSkill()}
+        onTriggerAttack={() => {
+          engineRef.current?.triggerAttack();
+          advanceTutorialStep("tut_attack");
+        }}
+        onTriggerSkill={() => {
+          engineRef.current?.triggerSkill();
+          advanceTutorialStep("tut_skill");
+        }}
         onTriggerUltimate={() => engineRef.current?.triggerUltimate()}
-        onTriggerDodge={() => engineRef.current?.triggerDodge()}
-        onOpenModal={(modal) => setActiveModal(modal)}
+        onTriggerDodge={() => {
+          engineRef.current?.triggerDodge();
+          advanceTutorialStep("tut_dodge");
+        }}
+        onTriggerEmote={(emote) => engineRef.current?.playEmote(emote)}
+        onOpenModal={(modal) => {
+          if (modal === "map") advanceTutorialStep("tut_map");
+          setActiveModal(modal);
+        }}
         bossState={bossState}
         floatingDamages={floatingDamages}
         activeReactions={activeReactions}
@@ -810,6 +956,17 @@ export default function App() {
           setIsMuted(muted);
         }}
       />
+
+      {/* Dynamic Tutorial Guide Prompt */}
+      {!isTutorialMinimized && (
+        <TutorialPrompt
+          currentStep={currentTutorialStep}
+          stepIndex={currentTutorialIndex >= 0 ? currentTutorialIndex : tutorialSteps.length}
+          totalSteps={tutorialSteps.length}
+          allCompleted={isAllTutorialCompleted}
+          onDismiss={() => setIsTutorialMinimized(true)}
+        />
+      )}
 
       {/* 3. Character Creator Modal (Initial Welcome / Customization) */}
       {isCustomizing && (
@@ -842,10 +999,13 @@ export default function App() {
         />
       )}
 
-      {/* 4. Cinematic Dialogue Box (NPC Interaction) */}
+      {/* 4. Cinematic Dialogue Box (NPC Interaction & Affinity) */}
       {activeNPC && (
         <DialogueBox
           npc={activeNPC}
+          relationship={relationships.find((r) => r.npcId === activeNPC.id)}
+          inventory={inventory}
+          onGiveGift={handleGiveGift}
           onSelectOption={(opt) => {
             if (opt.action === "open_alchemy") {
               setActiveNPC(null);
@@ -894,6 +1054,7 @@ export default function App() {
           currency={currency}
           onUseItem={handleUseItem}
           onEquipItem={handleEquipItem}
+          onSellItem={handleSellItem}
           onClose={() => setActiveModal(null)}
         />
       )}
@@ -976,6 +1137,7 @@ export default function App() {
         <ArchiveModal
           bestiary={bestiary}
           codex={codex}
+          factions={factions}
           onClose={() => setActiveModal(null)}
         />
       )}
@@ -998,6 +1160,96 @@ export default function App() {
           onPerformWish={(count) => handleWish("featured", count as 1 | 10)}
           onExchangePrisms={(amount) => handleExchange("shards", "prisms", amount)}
           onClose={() => setActiveModal(null)}
+        />
+      )}
+
+      {/* 6. Photography Mode Studio */}
+      {activeModal === "photo" && (
+        <PhotoModeModal
+          onClose={() => {
+            engineRef.current?.setPhotoMode(false);
+            setActiveModal(null);
+          }}
+          onSetCameraParams={(fov, dist, h, yaw) => {
+            engineRef.current?.setPhotoCamera(fov, dist, h, yaw);
+          }}
+          onTriggerPose={(pose) => {
+            engineRef.current?.playEmote(pose);
+          }}
+          onCapture={() => {
+            return engineRef.current?.captureScreenshot() || "";
+          }}
+        />
+      )}
+
+      {/* 7. Developer Debug & Performance Suite */}
+      {activeModal === "debug" && (
+        <DebugConsoleModal
+          onClose={() => setActiveModal(null)}
+          getDebugStats={() =>
+            engineRef.current?.getDebugStats() || {
+              fps: 60,
+              frameTimeMs: 16.6,
+              drawCalls: 120,
+              triangles: 45000,
+              activeEnemies: 0,
+              playerX: 0,
+              playerY: 0,
+              playerZ: 0,
+              timeString: "10:30",
+              weather: "Clear",
+            }
+          }
+          onTeleport={(pos) => handleFastTravel(pos)}
+          onSpawnEnemy={(type) => engineRef.current?.spawnDebugEnemy(type)}
+          onToggleGodMode={(enabled) => {
+            engineRef.current?.setGodMode(enabled);
+            addNotification(`God Mode: ${enabled ? "ACTIVATED" : "DEACTIVATED"}`, "level");
+          }}
+          onGrantCurrency={(shards, prisms) => {
+            setCurrency((c) => c + shards);
+            setAstralPrisms((p) => p + prisms);
+            audio.playCollectSound();
+            addNotification(`Granted +${shards} Shards & ${prisms} Prisms!`, "item");
+          }}
+          onHealAndRefill={() => {
+            setPlayerStats((prev) => ({
+              ...prev,
+              hp: prev.maxHp,
+              stamina: prev.maxStamina,
+              energy: prev.maxEnergy,
+            }));
+            audio.playCollectSound();
+            addNotification("Restored Maximum HP, Stamina & Energy!", "level");
+          }}
+          onSetTimePreset={(time) => engineRef.current?.setTimeOfDayPreset(time)}
+          onSetWeatherPreset={(weather) => engineRef.current?.setWeatherPreset(weather)}
+          onLevelUpActive={() => {
+            handleLevelUp(party[activeCharIndex].id);
+          }}
+          onCompleteActiveQuest={() => {
+            if (currentActiveQuest) {
+              setQuests((prev) =>
+                prev.map((q) =>
+                  q.id === currentActiveQuest.id
+                    ? {
+                        ...q,
+                        status: "completed",
+                        objectives: q.objectives.map((o) => ({
+                          ...o,
+                          completed: true,
+                          currentCount: o.targetCount,
+                        })),
+                      }
+                    : q
+                )
+              );
+              setCurrency((c) => c + 1000);
+              setAstralPrisms((p) => p + 160);
+              audio.playFanfare();
+              addNotification(`Debug: Completed ${currentActiveQuest.title}! (+Rewards)`, "quest");
+            }
+          }}
         />
       )}
     </div>

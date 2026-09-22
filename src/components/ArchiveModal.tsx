@@ -4,7 +4,7 @@
  */
 
 import React, { useState } from "react";
-import { BestiaryEntry, CodexLoreEntry, AetherElement } from "../types/game";
+import { BestiaryEntry, CodexLoreEntry, AetherElement, Faction } from "../types/game";
 import {
   X,
   BookOpen,
@@ -21,21 +21,25 @@ import {
   CheckCircle2,
   Lock,
   Compass,
+  Shield,
+  Award,
 } from "lucide-react";
 import { audio } from "../game/audio";
 
 interface ArchiveModalProps {
   bestiary: BestiaryEntry[];
   codex: CodexLoreEntry[];
+  factions?: Faction[];
   onClose: () => void;
 }
 
 export const ArchiveModal: React.FC<ArchiveModalProps> = ({
   bestiary,
   codex,
+  factions = [],
   onClose,
 }) => {
-  const [activeTab, setActiveTab] = useState<"bestiary" | "codex" | "flora">("bestiary");
+  const [activeTab, setActiveTab] = useState<"bestiary" | "codex" | "factions" | "flora">("bestiary");
 
   // Bestiary State
   const [selectedEnemyId, setSelectedEnemyId] = useState<string>(bestiary[0]?.id || "");
@@ -102,6 +106,7 @@ export const ArchiveModal: React.FC<ArchiveModalProps> = ({
           {[
             { id: "bestiary", label: "Bestiary & Entities", icon: Skull },
             { id: "codex", label: "Historical Codex & Lore", icon: Scroll },
+            { id: "factions", label: "Factions & Alliances", icon: Shield },
             { id: "flora", label: "Flora & Ley Minerals", icon: Leaf },
           ].map((tab) => {
             const Icon = tab.icon;
@@ -360,6 +365,105 @@ export const ArchiveModal: React.FC<ArchiveModalProps> = ({
                 </div>
               </div>
             )}
+          </div>
+        )}
+
+        {/* Content Area: Factions & Alliances */}
+        {activeTab === "factions" && (
+          <div className="flex-1 p-6 overflow-y-auto space-y-5">
+            <div>
+              <h3 className="text-sm font-bold text-neutral-100 uppercase tracking-wider flex items-center gap-2">
+                <Shield className="w-4 h-4 text-cyan-400" />
+                Regional Factions & Diplomatic Standing
+              </h3>
+              <p className="text-xs text-neutral-400 mt-0.5">
+                Earn reputation through quests, exploration, and aid to unlock blueprints, titles, and exclusive armaments.
+              </p>
+            </div>
+
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-5">
+              {factions.map((fac) => (
+                <div
+                  key={fac.id}
+                  className="bg-neutral-900/60 border border-neutral-800 rounded-2xl p-5 flex flex-col justify-between space-y-4 hover:border-cyan-500/40 transition-all"
+                >
+                  <div className="space-y-2.5">
+                    <div className="flex items-center justify-between">
+                      <div
+                        className="px-2.5 py-1 rounded-lg text-xs font-bold border"
+                        style={{
+                          borderColor: `${fac.bannerColor}60`,
+                          backgroundColor: `${fac.bannerColor}15`,
+                          color: fac.bannerColor,
+                        }}
+                      >
+                        {fac.standing}
+                      </div>
+                      <span className="text-xs font-mono text-neutral-400">{fac.reputation} / 1000 Rep</span>
+                    </div>
+
+                    <div>
+                      <h4 className="font-bold text-base text-neutral-100">{fac.name}</h4>
+                      <div className="text-xs text-cyan-400 font-medium">{fac.title}</div>
+                    </div>
+
+                    {/* Progress Bar */}
+                    <div className="w-full bg-neutral-950 h-2 rounded-full overflow-hidden border border-neutral-800">
+                      <div
+                        className="h-full rounded-full transition-all duration-500"
+                        style={{
+                          width: `${Math.min(100, (fac.reputation / 1000) * 100)}%`,
+                          backgroundColor: fac.bannerColor,
+                        }}
+                      />
+                    </div>
+
+                    <p className="text-xs text-neutral-300 leading-relaxed font-sans pt-1">
+                      {fac.description}
+                    </p>
+
+                    <div className="bg-neutral-950/80 p-3 rounded-xl border border-neutral-800/80 space-y-1 text-xs">
+                      <div className="text-[11px] text-neutral-400">
+                        <span className="font-bold text-neutral-300">Leader:</span> {fac.leader}
+                      </div>
+                      <div className="text-[11px] text-neutral-400">
+                        <span className="font-bold text-neutral-300">HQ:</span> {fac.headquarters}
+                      </div>
+                      <div className="text-[11px] text-neutral-400 italic pt-1 border-t border-neutral-900">
+                        "{fac.philosophy}"
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Standing Milestones */}
+                  <div className="border-t border-neutral-800/80 pt-3 space-y-1.5">
+                    <span className="text-[10px] font-bold uppercase tracking-wider text-neutral-400 block">
+                      Faction Rewards
+                    </span>
+                    {fac.rewards.map((r, i) => (
+                      <div
+                        key={i}
+                        className={`p-2 rounded-lg text-xs flex items-center justify-between border ${
+                          r.unlocked
+                            ? "bg-emerald-950/20 border-emerald-500/30 text-emerald-300"
+                            : "bg-neutral-950/50 border-neutral-800 text-neutral-500"
+                        }`}
+                      >
+                        <div className="flex items-center gap-1.5 truncate">
+                          {r.unlocked ? (
+                            <CheckCircle2 className="w-3.5 h-3.5 text-emerald-400 shrink-0" />
+                          ) : (
+                            <Lock className="w-3.5 h-3.5 text-neutral-600 shrink-0" />
+                          )}
+                          <span className="truncate">{r.rewardDesc}</span>
+                        </div>
+                        <span className="text-[10px] font-mono shrink-0 ml-2">{r.standing}</span>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              ))}
+            </div>
           </div>
         )}
 

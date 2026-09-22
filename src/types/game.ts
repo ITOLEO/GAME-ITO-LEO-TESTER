@@ -309,6 +309,19 @@ export interface DebugStats {
   playerZ: number;
   timeString: string;
   weather: string;
+  // Control & Physics Debug (Req 74)
+  keysPressed?: Record<string, boolean>;
+  cameraYawDeg?: number;
+  cameraPitchDeg?: number;
+  playerVelocity?: [number, number, number];
+  movementVector?: [number, number];
+  isGrounded?: boolean;
+  isSprinting?: boolean;
+  currentSpeed?: number;
+  inputContext?: string;
+  animState?: string;
+  pointerLocked?: boolean;
+  animDebugData?: any;
 }
 
 export interface GameSaveState {

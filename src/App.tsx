@@ -38,6 +38,7 @@ import {
   NPCRelationship,
   TutorialStep,
   EmoteType,
+  DebugStats,
 } from "./types/game";
 
 import { GameHUD } from "./components/GameHUD";
@@ -56,10 +57,17 @@ import { ShopModal } from "./components/ShopModal";
 import { PhotoModeModal } from "./components/PhotoModeModal";
 import { DebugConsoleModal } from "./components/DebugConsoleModal";
 import { TutorialPrompt } from "./components/TutorialPrompt";
+import { InputDebugOverlay } from "./components/InputDebugOverlay";
+import { AnimationDebuggerModal } from "./components/AnimationDebuggerModal";
 
 export default function App() {
   const containerRef = useRef<HTMLDivElement>(null);
   const engineRef = useRef<ThreeEngine | null>(null);
+
+  // Debug & Controls Diagnostic State (Req 74, 97, 98)
+  const [showInputDebug, setShowInputDebug] = useState(false);
+  const [showAnimationDebugger, setShowAnimationDebugger] = useState(false);
+  const [debugLiveStats, setDebugLiveStats] = useState<DebugStats | null>(null);
 
   // Core Game State
   const [party, setParty] = useState<PlayableCharacter[]>(() => {
@@ -472,6 +480,10 @@ export default function App() {
         setActiveModal((curr) => (curr === "photo" ? null : "photo"));
       } else if (e.code === "Backquote" || e.code === "F1") {
         setActiveModal((curr) => (curr === "debug" ? null : "debug"));
+      } else if (e.code === "F3") {
+        setShowInputDebug((prev) => !prev);
+      } else if (e.code === "F4") {
+        setShowAnimationDebugger((prev) => !prev);
       } else if (e.code === "Escape") {
         if (activeNPC) {
           setActiveNPC(null);
@@ -486,6 +498,31 @@ export default function App() {
     window.addEventListener("keydown", handleKeyDown);
     return () => window.removeEventListener("keydown", handleKeyDown);
   }, [party, activeModal, activeNPC, advanceTutorialStep]);
+
+  // Context syncing for input system (Req 51, 52)
+  useEffect(() => {
+    if (!engineRef.current) return;
+    if (activeModal || isCustomizing) {
+      engineRef.current.setInputContext("MENU");
+    } else if (activeNPC) {
+      engineRef.current.setInputContext("DIALOGUE");
+    } else if (playerStats.hp <= 0) {
+      engineRef.current.setInputContext("DEAD");
+    } else {
+      engineRef.current.setInputContext("GAMEPLAY");
+    }
+  }, [activeModal, activeNPC, isCustomizing, playerStats.hp]);
+
+  // Real-time polling for input debug overlay (Req 74)
+  useEffect(() => {
+    if (!showInputDebug) return;
+    const interval = setInterval(() => {
+      if (engineRef.current) {
+        setDebugLiveStats(engineRef.current.getDebugStats());
+      }
+    }, 50);
+    return () => clearInterval(interval);
+  }, [showInputDebug]);
 
   // 5. Progression Handlers
   const handleLevelUp = (charId: string) => {
@@ -1250,6 +1287,27 @@ export default function App() {
               addNotification(`Debug: Completed ${currentActiveQuest.title}! (+Rewards)`, "quest");
             }
           }}
+          onToggleInputOverlay={() => setShowInputDebug((prev) => !prev)}
+          isInputOverlayActive={showInputDebug}
+          onOpenAnimationDebugger={() => setShowAnimationDebugger(true)}
+        />
+      )}
+
+      {/* 8. Controls & Movement Diagnostics HUD Overlay (Req 74, Toggle with F3) */}
+      {showInputDebug && debugLiveStats && (
+        <InputDebugOverlay
+          stats={debugLiveStats}
+          onClose={() => setShowInputDebug(false)}
+        />
+      )}
+
+      {/* 9. Master Animation System Inspector & Test Mode Modal (Req 97 & 98, Toggle with F4) */}
+      {showAnimationDebugger && engineRef.current && (
+        <AnimationDebuggerModal
+          debugData={engineRef.current.getAnimationDebugData()}
+          onSetTestMode={(active, state) => engineRef.current?.setAnimationTestMode(active, state)}
+          onScrubTime={(t) => engineRef.current?.setAnimationScrubTime(t)}
+          onClose={() => setShowAnimationDebugger(false)}
         />
       )}
     </div>

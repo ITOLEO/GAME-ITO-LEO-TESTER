@@ -13,6 +13,20 @@ import {
   DebugStats,
 } from "../types/game";
 import { audio } from "./audio";
+import { ControlConfig, DEFAULT_CONTROL_CONFIG } from "./controls/controlConfig";
+import { CollisionSystem } from "./controls/collisionSystem";
+import { InputManager, InputContext } from "./controls/inputManager";
+import { CameraController } from "./controls/cameraController";
+import { MovementController } from "./controls/movementController";
+import { AnimationRegistry } from "./animation/AnimationRegistry";
+import { AnimationController } from "./animation/AnimationController";
+import { BossAnimationController } from "./animation/BossAnimationController";
+import { AnimationDebugData, AnimationState } from "./animation/animationTypes";
+import { EnvironmentBuilder } from "./visuals/environmentBuilder";
+import { VegetationSystem } from "./visuals/vegetationSystem";
+import { CharacterVisualBuilder } from "./visuals/characterVisualBuilder";
+import { EntityVisualBuilder } from "./visuals/entityVisualBuilder";
+import { WaterSystem } from "./visuals/waterSystem";
 
 export interface EngineCallbacks {
   onInteractPrompt: (prompt: string | null, action?: () => void) => void;
@@ -123,14 +137,24 @@ export class ThreeEngine {
   private atmosphericDust?: THREE.Points;
   private atmosphericRain?: THREE.Points;
 
-  // Camera Orbit
-  private cameraYaw = 0;
-  private cameraPitch = 0.35;
-  private cameraDistance = 5.5;
-  private isPointerLocked = false;
-  private isDraggingMouse = false;
-  private lastMouseX = 0;
-  private lastMouseY = 0;
+  // Modular Control System (Req 75-80)
+  public controlConfig: ControlConfig = { ...DEFAULT_CONTROL_CONFIG };
+  public collisionSystem!: CollisionSystem;
+  public inputManager!: InputManager;
+  public cameraController!: CameraController;
+  public movementController!: MovementController;
+
+  // Master Animation Architecture (Req 1-100)
+  public animRegistry: AnimationRegistry = new AnimationRegistry();
+  public animationController!: AnimationController;
+  public bossAnimationController!: BossAnimationController;
+
+  // Master Modular Visual Upgrade Architecture
+  private waterSystemUpdater?: (time: number) => void;
+  private environmentBuilder = new EnvironmentBuilder();
+  private vegetationSystem = new VegetationSystem();
+  private characterVisualBuilder = CharacterVisualBuilder.getInstance();
+  private entityVisualBuilder = EntityVisualBuilder.getInstance();
 
   // Combat State
   private activeCharacter: PlayableCharacter;
@@ -220,6 +244,10 @@ export class ThreeEngine {
     this.ambientLight = new THREE.AmbientLight(0xffeedd, 0.7);
     this.scene.add(this.ambientLight);
 
+    // Anime Bounce / Hemisphere Fill Light (sky light & ground bounce)
+    const hemiLight = new THREE.HemisphereLight(0xdbeafe, 0x86efac, 0.55);
+    this.scene.add(hemiLight);
+
     this.sunLight = new THREE.DirectionalLight(0xfff5e6, 1.8);
     this.sunLight.position.set(60, 100, 50);
     this.sunLight.castShadow = true;
@@ -250,6 +278,16 @@ export class ThreeEngine {
     this.scene.fog = new THREE.FogExp2(0xa7d8ff, 0.0032);
     this.buildAtmosphericParticles();
 
+    // Initialize Collision & Spatial System early for world building
+    this.collisionSystem = new CollisionSystem();
+
+    // Hotkey F3 to toggle Collision Debug Visualizer
+    window.addEventListener("keydown", (e) => {
+      if (e.key === "F3") {
+        this.collisionSystem.toggleDebugVisualizer(this.scene);
+      }
+    });
+
     // Build World (Terrain, Village, Ruins, Caldera, Trees)
     this.buildWorld();
 
@@ -258,6 +296,11 @@ export class ThreeEngine {
     this.playerModel = this.buildAnimeCharacter(this.activeCharacter);
     this.playerGroup.add(this.playerModel.root);
     this.scene.add(this.playerGroup);
+
+    // Master Animation System Initialization (Req 1-100)
+    this.animationController = this.animRegistry.getPlayerController();
+    this.bossAnimationController = this.animRegistry.getBossController();
+    this.animationController.setModel(this.playerModel, this.activeCharacter.weaponType);
 
     // Spawn Entities
     this.spawnNPCs();
@@ -333,19 +376,24 @@ export class ThreeEngine {
 
   // Build the complete vertical slice region
   private buildWorld() {
-    // 1. Terrain Mesh
+    // 1. Terrain Mesh with multi-band anime coloring and smooth shading
     const terrainSize = 320;
-    const terrainSegs = 96;
+    const terrainSegs = 128;
     const terrainGeo = new THREE.PlaneGeometry(terrainSize, terrainSize, terrainSegs, terrainSegs);
     terrainGeo.rotateX(-Math.PI / 2);
 
     const posAttr = terrainGeo.attributes.position;
     const colorAttr = new Float32Array(posAttr.count * 3);
 
-    const grassColor = new THREE.Color(0x56ab2f);
-    const lushColor = new THREE.Color(0xa8e063);
-    const rockColor = new THREE.Color(0x78716c);
-    const pathColor = new THREE.Color(0xd7ccc8);
+    const meadowGreen = new THREE.Color(0x4ade80);
+    const chartreuseLush = new THREE.Color(0x86efac);
+    const deepGlade = new THREE.Color(0x16a34a);
+    const cobblestonePath = new THREE.Color(0xd6d3d1);
+    const pathDirtEdge = new THREE.Color(0xa8a29e);
+    const riverGravel = new THREE.Color(0x78716c);
+    const cliffStone = new THREE.Color(0x52525b);
+    const calderaBasalt = new THREE.Color(0x1c1917);
+    const magmaGlow = new THREE.Color(0xb91c1c);
 
     for (let i = 0; i < posAttr.count; i++) {
       const x = posAttr.getX(i);
@@ -355,15 +403,44 @@ export class ThreeEngine {
 
       // Path carving to ruins and glade
       const distToGladePath = Math.abs(z - Math.sin(x * 0.04) * 8);
-      const isPath = x > -15 && x < 80 && distToGladePath < 4.5;
+      const isGladePath = x > -15 && x < 85 && distToGladePath < 4.8;
 
-      let c = grassColor.clone();
-      if (isPath) {
-        c.lerp(pathColor, 0.85);
-      } else if (y > 3.0) {
-        c.lerp(rockColor, 0.7);
+      // Caldera path
+      const calderaT = (-x - 10) / 55;
+      const isCalderaPath = x < -10 && x > -68 && Math.abs(z - calderaT * 55) < 4.5;
+
+      // Village central plaza
+      const distToCenter = Math.hypot(x, z);
+      const isVillagePlaza = distToCenter < 22;
+
+      // Caldera basin
+      const distToCaldera = Math.hypot(x - (-65), z - 60);
+
+      let c = meadowGreen.clone();
+
+      if (distToCaldera < 36) {
+        c.lerp(calderaBasalt, Math.min(1, (36 - distToCaldera) / 16));
+        if (distToCaldera < 20) {
+          c.lerp(magmaGlow, Math.sin(x * 0.2 + z * 0.2) * 0.25 + 0.25);
+        }
+      } else if (isVillagePlaza) {
+        c.lerp(cobblestonePath, 0.9);
+      } else if (isGladePath || isCalderaPath) {
+        const roadCenterDist = isGladePath ? distToGladePath : Math.abs(z - calderaT * 55);
+        const roadBlend = Math.min(1, roadCenterDist / 4.8);
+        const pathTone = cobblestonePath.clone().lerp(pathDirtEdge, roadBlend);
+        c.lerp(pathTone, 0.88);
+      } else if (Math.abs(x - 18) < 7.5) {
+        c.lerp(riverGravel, 0.85);
+      } else if (y > 3.2) {
+        c.lerp(cliffStone, Math.min(1, (y - 3.2) / 3.0));
       } else {
-        c.lerp(lushColor, (Math.sin(x * 0.1) + Math.cos(z * 0.1)) * 0.25 + 0.3);
+        const noise = (Math.sin(x * 0.08) + Math.cos(z * 0.08)) * 0.5;
+        if (noise > 0.2) {
+          c.lerp(chartreuseLush, 0.45);
+        } else if (noise < -0.2) {
+          c.lerp(deepGlade, 0.35);
+        }
       }
 
       colorAttr[i * 3] = c.r;
@@ -376,44 +453,24 @@ export class ThreeEngine {
 
     const terrainMat = new THREE.MeshStandardMaterial({
       vertexColors: true,
-      roughness: 0.85,
-      metalness: 0.05,
-      flatShading: true,
+      roughness: 0.82,
+      metalness: 0.04,
+      flatShading: false,
     });
     const terrainMesh = new THREE.Mesh(terrainGeo, terrainMat);
     terrainMesh.receiveShadow = true;
     this.scene.add(terrainMesh);
 
-    // 2. Sparkling River
-    const riverGeo = new THREE.PlaneGeometry(280, 14);
-    riverGeo.rotateX(-Math.PI / 2);
-    const riverMat = new THREE.MeshStandardMaterial({
-      color: 0x38bdf8,
-      transparent: true,
-      opacity: 0.75,
-      roughness: 0.1,
-      metalness: 0.2,
-    });
-    const river = new THREE.Mesh(riverGeo, riverMat);
-    river.position.set(18, -0.4, 0);
-    river.rotation.y = 0.2;
-    this.scene.add(river);
+    // 2. Animated River & Physical Arch Bridge
+    const waterBridge = this.waterSystem.buildWaterAndBridge(this.scene, this.collisionSystem);
+    this.waterSystemUpdater = waterBridge.update;
 
-    // River Bridge
-    const bridgeGeo = new THREE.BoxGeometry(7, 0.6, 18);
-    const bridgeMat = new THREE.MeshStandardMaterial({ color: 0x8d6e63, roughness: 0.9 });
-    const bridge = new THREE.Mesh(bridgeGeo, bridgeMat);
-    bridge.position.set(18, 0.5, 0);
-    bridge.rotation.y = 0.2;
-    bridge.castShadow = true;
-    bridge.receiveShadow = true;
-    this.scene.add(bridge);
+    // 3. Modular Village Architecture
+    const village = this.environmentBuilder.buildVillage(this.scene, this.terrainHeightMap, this.collisionSystem);
+    (this as any).windmillBlades = village.windmillBlades;
 
-    // 3. Sunvale Haven Buildings
-    this.buildVillageArchitecture();
-
-    // 4. Stylized Anime Trees & Foliage
-    this.buildFoliage();
+    // 4. Instanced Vegetation & Distinct Tree Species
+    this.vegetationSystem.buildVegetation(this.scene, this.terrainHeightMap, this.collisionSystem);
 
     // 5. Ancient Ruins
     this.buildAncientRuins();
@@ -422,158 +479,13 @@ export class ThreeEngine {
     this.buildCalderaArena();
   }
 
-  // Sunvale Haven village
-  private buildVillageArchitecture() {
-    // Village Windmill
-    const windmill = new THREE.Group();
-    const towerGeo = new THREE.CylinderGeometry(2.5, 3.8, 14, 8);
-    const towerMat = new THREE.MeshStandardMaterial({ color: 0xe0e7ff, roughness: 0.8 });
-    const tower = new THREE.Mesh(towerGeo, towerMat);
-    tower.position.y = 7;
-    tower.castShadow = true;
-    windmill.add(tower);
-
-    const roofGeo = new THREE.ConeGeometry(4, 5, 8);
-    const roofMat = new THREE.MeshStandardMaterial({ color: 0x991b1b, roughness: 0.7 });
-    const roof = new THREE.Mesh(roofGeo, roofMat);
-    roof.position.y = 16.5;
-    windmill.add(roof);
-
-    // Blades
-    const blades = new THREE.Group();
-    blades.position.set(0, 12, 3.2);
-    for (let b = 0; b < 4; b++) {
-      const bladeGeo = new THREE.BoxGeometry(1.2, 9, 0.15);
-      const bladeMat = new THREE.MeshStandardMaterial({ color: 0xfafafa, roughness: 0.9 });
-      const blade = new THREE.Mesh(bladeGeo, bladeMat);
-      blade.position.y = 4.5;
-      const bladeHolder = new THREE.Group();
-      bladeHolder.rotation.z = (b * Math.PI) / 2;
-      bladeHolder.add(blade);
-      blades.add(bladeHolder);
-    }
-    windmill.add(blades);
-    windmill.position.set(-8, 0, -22);
-    this.scene.add(windmill);
-
-    // Animate blades in loop
-    (this as any).windmillBlades = blades;
-
-    // Cottages
-    const cottagePositions: [number, number, number][] = [
-      [-18, 0, -8],
-      [14, 0, -12],
-      [-12, 0, 14],
-      [16, 0, 16],
-    ];
-
-    cottagePositions.forEach(([cx, cy, cz]) => {
-      const house = new THREE.Group();
-      const baseGeo = new THREE.BoxGeometry(8, 5, 7);
-      const baseMat = new THREE.MeshStandardMaterial({ color: 0xf1f5f9, roughness: 0.85 });
-      const base = new THREE.Mesh(baseGeo, baseMat);
-      base.position.y = 2.5;
-      base.castShadow = true;
-      base.receiveShadow = true;
-      house.add(base);
-
-      // Timber beams
-      const beamMat = new THREE.MeshStandardMaterial({ color: 0x5c3a21, roughness: 0.9 });
-      for (const bx of [-3.9, 3.9]) {
-        for (const bz of [-3.4, 3.4]) {
-          const corner = new THREE.Mesh(new THREE.BoxGeometry(0.4, 5.2, 0.4), beamMat);
-          corner.position.set(bx, 2.6, bz);
-          house.add(corner);
-        }
-      }
-
-      // Roof
-      const hRoofGeo = new THREE.ConeGeometry(6.5, 4, 4);
-      const hRoofMat = new THREE.MeshStandardMaterial({ color: 0x0369a1, roughness: 0.7 });
-      const hRoof = new THREE.Mesh(hRoofGeo, hRoofMat);
-      hRoof.position.y = 6.8;
-      hRoof.rotation.y = Math.PI / 4;
-      hRoof.scale.set(1.1, 1, 0.9);
-      hRoof.castShadow = true;
-      house.add(hRoof);
-
-      // Warm glowing lantern at doorway
-      const lantern = new THREE.PointLight(0xfef08a, 1.2, 8);
-      lantern.position.set(0, 3, 3.8);
-      house.add(lantern);
-
-      house.position.set(cx, cy + this.terrainHeightMap(cx, cz), cz);
-      this.scene.add(house);
-    });
-
-    // Village Plaza Lanterns & Benches
-    const lanternMat = new THREE.MeshStandardMaterial({ color: 0x334155 });
-    for (const lz of [-14, -2, 10]) {
-      const pole = new THREE.Mesh(new THREE.CylinderGeometry(0.12, 0.15, 3.8), lanternMat);
-      pole.position.set(3, 1.9, lz);
-      this.scene.add(pole);
-
-      const lampLight = new THREE.PointLight(0xfef08a, 0.9, 7);
-      lampLight.position.set(3, 3.6, lz);
-      this.scene.add(lampLight);
-    }
-  }
-
-  // Stylized anime foliage
-  private buildFoliage() {
-    const treeMat = new THREE.MeshStandardMaterial({
-      color: 0x22c55e,
-      roughness: 0.8,
-      flatShading: true,
-    });
-    const trunkMat = new THREE.MeshStandardMaterial({
-      color: 0x78350f,
-      roughness: 0.9,
-    });
-
-    for (let i = 0; i < 90; i++) {
-      const angle = Math.random() * Math.PI * 2;
-      const dist = 30 + Math.random() * 110;
-      const tx = Math.cos(angle) * dist;
-      const tz = Math.sin(angle) * dist;
-
-      // Don't spawn on caldera or inside village plaza
-      if (tx < -40 && tz > 40) continue;
-      if (Math.abs(tx) < 22 && Math.abs(tz) < 22) continue;
-
-      const ty = this.terrainHeightMap(tx, tz);
-      const tree = new THREE.Group();
-
-      const trunkHeight = 3.5 + Math.random() * 2;
-      const trunk = new THREE.Mesh(
-        new THREE.CylinderGeometry(0.35, 0.55, trunkHeight, 6),
-        trunkMat
-      );
-      trunk.position.y = trunkHeight / 2;
-      trunk.castShadow = true;
-      tree.add(trunk);
-
-      // Anime cloud canopy (overlapping dodecahedrons)
-      const layers = 3;
-      for (let l = 0; l < layers; l++) {
-        const radius = (3.2 - l * 0.7) * (0.8 + Math.random() * 0.4);
-        const crown = new THREE.Mesh(
-          new THREE.DodecahedronGeometry(radius, 1),
-          treeMat
-        );
-        crown.position.y = trunkHeight + l * 1.8;
-        crown.castShadow = true;
-        tree.add(crown);
-      }
-
-      tree.position.set(tx, ty, tz);
-      this.scene.add(tree);
-    }
-  }
-
   // Ancient Aether Ruins
   private buildAncientRuins() {
     const ruinsGroup = new THREE.Group();
+    const rx = 75;
+    const rz = -45;
+    const ry = this.terrainHeightMap(rx, rz);
+
     const marbleMat = new THREE.MeshStandardMaterial({
       color: 0xf8fafc,
       roughness: 0.6,
@@ -591,7 +503,7 @@ export class ThreeEngine {
       [10, 10],
     ];
 
-    colCoords.forEach(([cx, cz]) => {
+    colCoords.forEach(([cx, cz], idx) => {
       const height = 7 + Math.random() * 5;
       const col = new THREE.Mesh(new THREE.CylinderGeometry(1.2, 1.4, height, 12), marbleMat);
       col.position.set(cx, height / 2, cz);
@@ -603,6 +515,9 @@ export class ThreeEngine {
       ring.position.set(cx, height * 0.7, cz);
       ring.rotation.x = Math.PI / 2;
       ruinsGroup.add(ring);
+
+      // Register collision for ruins columns
+      this.collisionSystem.addCylinderCollider(`ruin_col_${idx}`, rx + cx, rz + cz, 1.4, ry, ry + height);
     });
 
     // Floating Ancient Monolith Core
@@ -622,9 +537,7 @@ export class ThreeEngine {
     ruLight.position.set(0, 6, 0);
     ruinsGroup.add(ruLight);
 
-    const rx = 75;
-    const rz = -45;
-    ruinsGroup.position.set(rx, this.terrainHeightMap(rx, rz), rz);
+    ruinsGroup.position.set(rx, ry, rz);
     this.scene.add(ruinsGroup);
   }
 
@@ -692,6 +605,9 @@ export class ThreeEngine {
       pillar.castShadow = true;
       pillar.receiveShadow = true;
       caldera.add(pillar);
+
+      // Register collision for caldera perimeter pillars
+      this.collisionSystem.addCylinderCollider(`caldera_pillar_${a}`, -65 + px, 60 + pz, 1.8, this.terrainHeightMap(-65, 60), this.terrainHeightMap(-65, 60) + height);
 
       // Warm perimeter braziers every 5 pillars
       if (a % 5 === 0) {
@@ -1006,6 +922,8 @@ export class ThreeEngine {
     this.playerGroup.remove(this.playerModel.root);
     this.playerModel = this.buildAnimeCharacter(char);
     this.playerGroup.add(this.playerModel.root);
+    this.animationController.setModel(this.playerModel, char.weaponType);
+    this.animationController.setWeaponType(char.weaponType);
   }
 
   // Spawn NPCs with interactive indicators
@@ -1053,6 +971,9 @@ export class ThreeEngine {
         mesh: g,
         pos: g.position,
       });
+
+      // Register NPC Living Animation Controller (Req 64-67)
+      this.animRegistry.registerNPC(def.id, def.role);
     });
   }
 
@@ -1266,12 +1187,22 @@ export class ThreeEngine {
       horn.rotation.x = 0.5;
       g.add(horn);
 
+      // Tail with secondary spring wag
+      const tail = new THREE.Mesh(new THREE.ConeGeometry(0.12, 0.9, 4), bodyMat);
+      tail.position.set(0, 0.7, -0.9);
+      tail.rotation.x = -Math.PI * 0.35;
+      g.add(tail);
+
       const sy = this.terrainHeightMap(sx, sz);
       g.position.set(sx, sy, sz);
       this.scene.add(g);
 
+      const stalkerId = `stalker_${idx}`;
+      const stalkerCtrl = this.animRegistry.registerMonster(stalkerId, "aetherling");
+      stalkerCtrl.setMeshParts({ tail });
+
       this.enemies.push({
-        id: `stalker_${idx}`,
+        id: stalkerId,
         name: "Aetherling Stalker",
         type: "aetherling",
         mesh: g,
@@ -1308,6 +1239,8 @@ export class ThreeEngine {
 
     rvGroup.position.set(rvx, rvy, rvz);
     this.scene.add(rvGroup);
+
+    this.animRegistry.registerMonster("vanguard_01", "vanguard");
 
     this.enemies.push({
       id: "vanguard_01",
@@ -1367,12 +1300,15 @@ export class ThreeEngine {
     }
 
     // Heavy Stone Fists
+    const bossFists: THREE.Mesh[] = [];
     for (const fx of [-3.2, 3.2]) {
       const bFist = new THREE.Mesh(new THREE.BoxGeometry(1.6, 2.4, 1.6), titanRockMat);
       bFist.position.set(fx, 3.5, 0.5);
       bFist.castShadow = true;
       bossGroup.add(bFist);
+      bossFists.push(bFist);
     }
+    this.bossAnimationController.setParts(bTorso, bHead, bCore, bossFists);
 
     bossGroup.position.set(bx, by, bz);
     this.scene.add(bossGroup);
@@ -1399,75 +1335,51 @@ export class ThreeEngine {
     });
   }
 
-  // Setup Mouse & Keyboard
+  // Setup Controls, Camera, Movement & Input Manager (Req 10-26, 75-80)
   private setupInputs() {
-    window.addEventListener("keydown", (e) => {
-      this.keysPressed[e.code] = true;
-
-      if (e.code === "KeyE") {
+    this.cameraController = new CameraController(this.camera, this.controlConfig, this.collisionSystem);
+    this.inputManager = new InputManager(this.container, {
+      onInteract: () => {
         if (this.currentInteractionAction) {
           this.currentInteractionAction();
         }
-      } else if (e.code === "KeyQ") {
-        this.triggerSkill();
-      } else if (e.code === "KeyR") {
-        this.triggerUltimate();
-      } else if (e.code === "Space") {
-        this.jump();
-      }
-    });
-
-    window.addEventListener("keyup", (e) => {
-      this.keysPressed[e.code] = false;
-    });
-
-    // Mouse combat & camera
-    this.container.addEventListener("mousedown", (e) => {
-      if (e.button === 0) {
-        // Left click = Attack
-        this.triggerAttack();
-      } else if (e.button === 2) {
-        // Right click = Dodge
+      },
+      onAttack: (isHeavy) => {
+        this.triggerAttack(isHeavy);
+      },
+      onDodge: () => {
         this.triggerDodge();
-      }
-      this.isDraggingMouse = true;
-      this.lastMouseX = e.clientX;
-      this.lastMouseY = e.clientY;
+      },
+      onJump: () => {
+        this.jump();
+      },
+      onSkill: () => {
+        this.triggerSkill();
+      },
+      onUltimate: () => {
+        this.triggerUltimate();
+      },
     });
 
-    window.addEventListener("mouseup", () => {
-      this.isDraggingMouse = false;
-    });
-
-    window.addEventListener("mousemove", (e) => {
-      if (this.isDraggingMouse || this.isPointerLocked) {
-        const deltaX = e.clientX - this.lastMouseX;
-        const deltaY = e.clientY - this.lastMouseY;
-        this.lastMouseX = e.clientX;
-        this.lastMouseY = e.clientY;
-
-        this.cameraYaw -= deltaX * 0.004;
-        this.cameraPitch = Math.max(0.08, Math.min(1.2, this.cameraPitch + deltaY * 0.0035));
-      }
-    });
-
-    // Zoom
-    this.container.addEventListener("wheel", (e) => {
-      this.cameraDistance = Math.max(3.2, Math.min(9.5, this.cameraDistance + e.deltaY * 0.006));
-    });
-
-    // Prevent context menu
-    this.container.addEventListener("contextmenu", (e) => e.preventDefault());
+    this.movementController = new MovementController(
+      this.playerPos,
+      this.controlConfig,
+      this.collisionSystem,
+      this.cameraController,
+      this.inputManager
+    );
   }
 
-  // Jump with landing sound trigger (Req 68)
+  // Jump with physics & landing sound trigger (Req 40, 41, 68)
   private jump() {
-    if (this.isGrounded && this.activeCharacter.stats.stamina >= 10) {
-      this.playerVelocity.y = 8.5;
-      this.isGrounded = false;
-      this.animState = "JUMP";
-      this.activeCharacter.stats.stamina -= 8;
-      audio.playJumpSound();
+    if (this.isGrounded && this.activeCharacter.stats.stamina >= 8) {
+      if (this.movementController.jump()) {
+        this.isGrounded = false;
+        this.animState = "JUMP";
+        this.animationController.requestState("JUMP_START", 0.08);
+        this.activeCharacter.stats.stamina -= 8;
+        audio.playJumpSound();
+      }
     }
   }
 
@@ -1480,6 +1392,9 @@ export class ThreeEngine {
     this.isHeavyAttack = isHeavy;
     this.animState = isHeavy ? "HEAVY_ATTACK" : "ATTACK";
     this.attackPhase = "anticipation";
+
+    // Trigger state machine transition & combo advance in AnimationController
+    this.animationController.triggerAttack(isHeavy);
 
     // Weapon weight determines anticipation duration (Greatsword slower, Sword/Spear/Catalyst snappy)
     const isGreatsword = this.activeCharacter.weaponType === "Greatsword";
@@ -1519,6 +1434,7 @@ export class ThreeEngine {
     this.skillCooldownTimer = this.activeCharacter.skillCooldown;
     this.isUsingSkill = true;
 
+    this.animationController.triggerSkill();
     audio.playSkillSound(this.activeCharacter.element);
     this.callbacks.onNotification(`${this.activeCharacter.name}: ${this.activeCharacter.skillName}!`);
 
@@ -1548,14 +1464,12 @@ export class ThreeEngine {
     this.activeCharacter.stats.energy = 0;
     this.isUsingUltimate = true;
 
+    this.animationController.triggerUltimate();
     audio.playUltimateSound();
     this.callbacks.onNotification(`BURST: ${this.activeCharacter.ultimateName}!!`, "boss");
 
-    // Camera punch-in
-    this.cameraDistance = 3.5;
-    setTimeout(() => {
-      this.cameraDistance = 5.5;
-    }, 800);
+    // Camera punch-in (Req 23)
+    this.cameraController.punchInDistance(3.5, 800);
 
     // Massive elemental explosion
     this.spawnParticleBurst(this.playerPos, this.activeCharacter.avatarColor, 80);
@@ -1575,19 +1489,19 @@ export class ThreeEngine {
     }, 1200);
   }
 
-  // Dodge & Perfect Dodge
+  // Dodge & Perfect Dodge (Req 44, 45, 46)
   public triggerDodge() {
     if (this.isDodging || this.activeCharacter.stats.stamina < 18) return;
 
     this.isDodging = true;
-    this.dodgeTimer = 0.35;
+    this.dodgeTimer = this.controlConfig.dodgeDuration;
     this.isInvulnerable = true;
     this.activeCharacter.stats.stamina -= 18;
+    this.animState = "DODGE";
+    this.animationController.triggerDodge();
 
-    // Dash impulse in movement or facing direction
-    const dashDir = new THREE.Vector3(0, 0, 1).applyAxisAngle(new THREE.Vector3(0, 1, 0), this.playerRotation);
-    this.playerVelocity.x = dashDir.x * 16;
-    this.playerVelocity.z = dashDir.z * 16;
+    // Dash impulse via MovementController
+    this.movementController.triggerDodge(this.controlConfig.dodgeImpulse);
 
     // Check for Perfect Dodge (if any enemy is in active attack swing within 4.5m)
     let triggeredPerfect = false;
@@ -1782,7 +1696,8 @@ export class ThreeEngine {
 
   // Fast-travel teleport
   public teleportTo(pos: [number, number, number]) {
-    this.playerPos.set(pos[0], pos[1] + 1, pos[2]);
+    this.movementController.setPosition(pos[0], pos[1] + 1, pos[2]);
+    this.playerPos.copy(this.movementController.getPosition());
     this.playerVelocity.set(0, 0, 0);
     this.spawnParticleBurst(this.playerPos, "#38bdf8", 40);
     this.callbacks.onNotification("Resonated with Waystone!", "quest");
@@ -1828,17 +1743,33 @@ export class ThreeEngine {
       this.activeCharacter.stats.energy = this.activeCharacter.stats.maxEnergy;
     }
 
-    // 1. Player Movement & Physics
-    let moveX = 0;
-    let moveZ = 0;
+    // 1. Process Camera Input (Req 13-26)
+    const mouseDelta = this.inputManager.consumeMouseDelta();
+    const wheelDelta = this.inputManager.consumeWheelDelta();
+    this.cameraController.handleMouseMove(mouseDelta.x, mouseDelta.y);
+    if (wheelDelta !== 0) {
+      this.cameraController.handleWheelZoom(wheelDelta);
+    }
 
-    if (this.keysPressed["KeyW"] || this.keysPressed["ArrowUp"]) moveZ += 1;
-    if (this.keysPressed["KeyS"] || this.keysPressed["ArrowDown"]) moveZ -= 1;
-    if (this.keysPressed["KeyA"] || this.keysPressed["ArrowLeft"]) moveX -= 1;
-    if (this.keysPressed["KeyD"] || this.keysPressed["ArrowRight"]) moveX += 1;
+    const animTime = performance.now() * 0.006;
 
-    this.isSprinting = !!(this.keysPressed["ShiftLeft"] || this.keysPressed["ShiftRight"]);
-    if (this.isSprinting && (moveX !== 0 || moveZ !== 0)) {
+    // 2. Player Movement & Physics (Req 2-9, 27-30, 33-36, 60-61, 75-80)
+    this.movementController.setAttacking(this.isAttacking);
+    const moveResult = this.movementController.update(
+      delta,
+      this.activeCharacter.stats.stamina,
+      (x, z) => this.terrainHeightMap(x, z)
+    );
+
+    this.playerPos.copy(this.movementController.getPosition());
+    this.playerRotation = this.movementController.getRotation();
+    this.isGrounded = moveResult.isGrounded;
+    this.isSprinting = this.movementController.isSprintActive();
+    const isMoving = moveResult.isMoving;
+    this.playerVelocity.copy(this.movementController.getVelocity());
+
+    // Stamina drain during sprint
+    if (this.isSprinting && isMoving) {
       this.activeCharacter.stats.stamina = Math.max(0, this.activeCharacter.stats.stamina - delta * 12);
       if (this.activeCharacter.stats.stamina <= 0) {
         this.isSprinting = false;
@@ -1851,42 +1782,8 @@ export class ThreeEngine {
       );
     }
 
-    const moveVector = new THREE.Vector3(moveX, 0, moveZ);
-    const isMoving = moveVector.lengthSq() > 0.01;
-
-    if (isMoving) {
-      moveVector.normalize();
-      // Rotate by camera yaw
-      moveVector.applyAxisAngle(new THREE.Vector3(0, 1, 0), this.cameraYaw);
-
-      const targetRotation = Math.atan2(moveVector.x, moveVector.z);
-      // Smooth player turn
-      let angleDiff = targetRotation - this.playerRotation;
-      while (angleDiff > Math.PI) angleDiff -= Math.PI * 2;
-      while (angleDiff < -Math.PI) angleDiff += Math.PI * 2;
-      this.playerRotation += angleDiff * Math.min(1, delta * 14);
-
-      const speed = this.isSprinting ? 9.5 : 5.2;
-      this.playerVelocity.x = moveVector.x * speed;
-      this.playerVelocity.z = moveVector.z * speed;
-    } else {
-      this.playerVelocity.x *= 0.82;
-      this.playerVelocity.z *= 0.82;
-    }
-
-    // Gravity & Ground Height
-    this.playerVelocity.y -= 22 * delta;
-    this.playerPos.addScaledVector(this.playerVelocity, delta);
-
-    const terrainY = this.terrainHeightMap(this.playerPos.x, this.playerPos.z);
-    if (this.playerPos.y <= terrainY) {
-      this.playerPos.y = terrainY;
-      this.playerVelocity.y = 0;
-      this.isGrounded = true;
-    }
-
     // Landing detection (Req 68)
-    if (!this.wasGrounded && this.isGrounded) {
+    if (moveResult.justLanded) {
       this.currentSurface = this.getSurfaceAt(this.playerPos.x, this.playerPos.z);
       audio.playLandSound(this.currentSurface);
     }
@@ -1895,7 +1792,7 @@ export class ThreeEngine {
     // Footsteps distance accumulator (Req 68)
     if (isMoving && this.isGrounded) {
       const stepDistance = this.isSprinting ? 3.0 : 2.0;
-      this.footstepAccumulator += (this.isSprinting ? 9.5 : 5.2) * delta;
+      this.footstepAccumulator += moveResult.currentSpeed * delta;
       if (this.footstepAccumulator >= stepDistance) {
         this.footstepAccumulator = 0;
         this.currentSurface = this.getSurfaceAt(this.playerPos.x, this.playerPos.z);
@@ -1909,103 +1806,39 @@ export class ThreeEngine {
     this.playerGroup.position.copy(this.playerPos);
     this.playerGroup.rotation.y = this.playerRotation;
 
-    // 2. Character Model Animations with State Machine & Blending (Req 64, 65, 66)
-    const animTime = performance.now() * 0.006;
-    if (isMoving && this.isGrounded) {
-      this.activeEmote = null;
-      this.playerModel.root.position.y = 0;
-      this.playerModel.body.rotation.set(0, 0, 0);
-      this.playerModel.head.rotation.set(0, 0, 0);
-      const runCycle = animTime * (this.isSprinting ? 2.2 : 1.5);
-      this.playerModel.leftLeg.rotation.x = Math.sin(runCycle) * 0.8;
-      this.playerModel.rightLeg.rotation.x = -Math.sin(runCycle) * 0.8;
-      this.playerModel.leftArm.rotation.x = -Math.sin(runCycle) * 0.6;
-      if (!this.isAttacking) {
-        this.playerModel.rightArm.rotation.x = Math.sin(runCycle) * 0.6;
+    // 2. Character Model Animations with Master Animation Architecture (Req 1-100)
+    this.animRegistry.tickFrame();
+    this.animationController.update(
+      delta,
+      this.playerVelocity,
+      this.isGrounded,
+      this.isSprinting,
+      this.playerPos,
+      this.playerRotation,
+      () => {
+        // Combat hit frame event: damage check synchronized to strike impact keyframe (Req 81, 82, 83)
+        this.performAttackHitCheck(this.isHeavyAttack);
+      },
+      () => {
+        // Footstep contact frame event: foot contact matching ground surface (Req 80)
+        this.currentSurface = this.getSurfaceAt(this.playerPos.x, this.playerPos.z);
+        audio.playFootstep(this.currentSurface);
       }
-      this.playerModel.cape.rotation.x = 0.4 + Math.sin(runCycle * 2) * 0.15;
-    } else if (this.activeEmote) {
-      this.emoteTimer -= delta;
-      if (this.emoteTimer <= 0) {
-        this.activeEmote = null;
-        this.playerModel.root.position.y = 0;
-        this.playerModel.body.rotation.set(0, 0, 0);
-        this.playerModel.head.rotation.set(0, 0, 0);
-      } else {
-        if (this.activeEmote === "wave") {
-          this.playerModel.rightArm.rotation.z = Math.sin(animTime * 4) * 0.4 + 1.8;
-          this.playerModel.rightArm.rotation.x = -0.4;
-          this.playerModel.leftArm.rotation.set(0, 0, 0);
-        } else if (this.activeEmote === "sit") {
-          this.playerModel.root.position.y = -0.55;
-          this.playerModel.leftLeg.rotation.x = Math.PI * 0.45;
-          this.playerModel.rightLeg.rotation.x = Math.PI * 0.45;
-          this.playerModel.leftArm.rotation.x = 0.3;
-          this.playerModel.rightArm.rotation.x = 0.3;
-        } else if (this.activeEmote === "dance") {
-          this.playerModel.body.rotation.y = Math.sin(animTime * 3) * 0.6;
-          this.playerModel.leftArm.rotation.z = -1.2 + Math.sin(animTime * 3.5) * 0.4;
-          this.playerModel.rightArm.rotation.z = 1.2 - Math.sin(animTime * 3.5) * 0.4;
-          this.playerModel.root.position.y = Math.abs(Math.sin(animTime * 3.5)) * 0.2;
-        } else if (this.activeEmote === "victory") {
-          this.playerModel.leftArm.rotation.z = -2.2;
-          this.playerModel.rightArm.rotation.z = 2.2;
-          this.playerModel.body.scale.set(1.05, 1.05, 1.05);
-        } else if (this.activeEmote === "bow") {
-          this.playerModel.body.rotation.x = 0.55;
-          this.playerModel.head.rotation.x = 0.35;
-        } else if (this.activeEmote === "laugh") {
-          this.playerModel.head.rotation.x = -0.3;
-          this.playerModel.body.position.y = Math.sin(animTime * 6) * 0.08;
-        }
-      }
-    } else {
-      // Idle breathing
-      this.playerModel.root.position.y = 0;
-      this.playerModel.body.rotation.set(0, 0, 0);
-      this.playerModel.head.rotation.set(0, 0, 0);
-      const breath = Math.sin(animTime * 0.5) * 0.04;
-      this.playerModel.body.scale.set(1 + breath, 1 + breath, 1 + breath);
-      this.playerModel.leftLeg.rotation.x *= 0.8;
-      this.playerModel.rightLeg.rotation.x *= 0.8;
-      this.playerModel.leftArm.rotation.x = Math.sin(animTime * 0.5) * 0.1;
-      this.playerModel.cape.rotation.x = 0.2 + Math.sin(animTime * 0.4) * 0.08;
-    }
+    );
 
-    // Attack phase update: anticipation -> strike -> recovery (Req 60, 64, 65, 66)
+    // Keep attack state machine in sync for gameplay flags
     if (this.isAttacking) {
       this.attackPhaseTimer -= delta;
-      if (this.attackPhase === "anticipation") {
-        this.playerModel.rightArm.rotation.x = -1.15;
-        this.playerModel.body.rotation.y = -0.22;
-        if (this.attackPhaseTimer <= 0) {
-          this.attackPhase = "strike";
-          this.attackPhaseTimer = this.isHeavyAttack ? 0.22 : 0.14;
-          (this.playerModel.slashArc.material as THREE.MeshBasicMaterial).opacity = 0.95;
-          this.playerModel.slashArc.rotation.z = Math.random() * Math.PI * 2;
-          this.performAttackHitCheck(this.isHeavyAttack);
-        }
-      } else if (this.attackPhase === "strike") {
-        this.playerModel.rightArm.rotation.x = 1.35;
-        this.playerModel.body.rotation.y = 0.35;
-        if (this.attackPhaseTimer <= 0) {
-          this.attackPhase = "recovery";
-          this.attackPhaseTimer = this.isHeavyAttack ? 0.2 : 0.12;
-        }
-      } else if (this.attackPhase === "recovery") {
-        this.playerModel.rightArm.rotation.x = THREE.MathUtils.lerp(this.playerModel.rightArm.rotation.x, 0.2, delta * 12);
-        this.playerModel.body.rotation.y = THREE.MathUtils.lerp(this.playerModel.body.rotation.y, 0, delta * 12);
-        if (this.attackPhaseTimer <= 0) {
-          this.attackPhase = "none";
-          this.isAttacking = false;
-        }
+      if (this.attackPhase === "anticipation" && this.attackPhaseTimer <= 0) {
+        this.attackPhase = "strike";
+        this.attackPhaseTimer = this.isHeavyAttack ? 0.22 : 0.14;
+      } else if (this.attackPhase === "strike" && this.attackPhaseTimer <= 0) {
+        this.attackPhase = "recovery";
+        this.attackPhaseTimer = this.isHeavyAttack ? 0.2 : 0.12;
+      } else if (this.attackPhase === "recovery" && this.attackPhaseTimer <= 0) {
+        this.attackPhase = "none";
+        this.isAttacking = false;
       }
-    }
-
-    // Slash Arc Fade
-    const arcMat = this.playerModel.slashArc.material as THREE.MeshBasicMaterial;
-    if (arcMat.opacity > 0) {
-      arcMat.opacity = Math.max(0, arcMat.opacity - delta * 4);
     }
 
     // Cooldowns
@@ -2019,30 +1852,29 @@ export class ThreeEngine {
         this.isInvulnerable = false;
       }
     }
+    // Attack combo & input buffer check (Req 48, 49)
+    this.inputManager.updateBuffer(delta);
     if (this.comboTimer > 0) {
       this.comboTimer -= delta;
       if (this.comboTimer <= 0) {
-        this.comboStep = 0;
-        this.isAttacking = false;
+        if (this.inputManager.consumeAttackBuffer()) {
+          this.triggerAttack();
+        } else {
+          this.comboStep = 0;
+          this.isAttacking = false;
+          this.movementController.setAttacking(false);
+        }
       }
     }
 
-    // 3. Update Camera Orbit
-    const activeDistance = this.isPhotoMode ? this.photoDistance : this.cameraDistance;
-    const activeHeight = this.isPhotoMode ? this.photoHeightOffset : 1.8;
-    const activeYaw = this.isPhotoMode ? this.cameraYaw + this.photoYawDelta : this.cameraYaw;
-    const camOffset = new THREE.Vector3(
-      Math.sin(activeYaw) * Math.cos(this.cameraPitch) * activeDistance,
-      Math.sin(this.cameraPitch) * activeDistance + activeHeight,
-      Math.cos(activeYaw) * Math.cos(this.cameraPitch) * activeDistance
+    // 3. Update Camera Orbit & Follow (Req 13-26, 38)
+    this.cameraController.update(
+      delta,
+      this.playerPos,
+      this.isSprinting,
+      isMoving,
+      (x, z) => this.terrainHeightMap(x, z)
     );
-    const targetCamPos = this.playerPos.clone().add(camOffset);
-    // Don't clip through terrain
-    const minCamY = this.terrainHeightMap(targetCamPos.x, targetCamPos.z) + 0.5;
-    if (targetCamPos.y < minCamY) targetCamPos.y = minCamY;
-
-    this.camera.position.lerp(targetCamPos, delta * 12);
-    this.camera.lookAt(this.playerPos.x, this.playerPos.y + (this.isPhotoMode ? activeHeight * 0.8 : 1.5), this.playerPos.z);
 
     // 4. Update Enemies AI
     let activeBoss: EnemyEntity | null = null;
@@ -2065,6 +1897,36 @@ export class ThreeEngine {
 
       // Attack cooldown
       enemy.attackCooldown = Math.max(0, enemy.attackCooldown - delta);
+
+      // Update enemy specialized animation controllers (Req 55-63)
+      if (enemy.type === "boss") {
+        this.bossAnimationController.update(
+          delta,
+          enemy.mesh,
+          enemy.state === "chase",
+          enemy.state === "attack",
+          enemy.isVulnerable,
+          enemy.hp <= 0,
+          () => {
+            // Ground slam / heavy fist impact frame! (Req 61, 62)
+            this.cameraController.shake(0.35, 320);
+            this.spawnParticleBurst(enemy.pos, "#f97316", 40);
+          }
+        );
+      } else {
+        const monsterCtrl = this.animRegistry.getMonster(enemy.id);
+        if (monsterCtrl && this.animRegistry.shouldUpdateEntity(distToPlayer)) {
+          monsterCtrl.update(
+            delta,
+            enemy.mesh,
+            enemy.state === "chase",
+            enemy.state === "attack",
+            enemy.isVulnerable,
+            enemy.hp <= 0,
+            distToPlayer
+          );
+        }
+      }
 
       // Simple AI state machine
       if (!enemy.isVulnerable) {
@@ -2092,6 +1954,10 @@ export class ThreeEngine {
                   const dmg = Math.max(10, enemy.atk - this.activeCharacter.stats.def * 0.4);
                   this.activeCharacter.stats.hp = Math.max(0, this.activeCharacter.stats.hp - Math.round(dmg));
                   audio.playHitSound(false, false);
+                  this.animationController.triggerHit({ direction: "FRONT", intensity: 1.0 });
+                  if (this.activeCharacter.stats.hp <= 0) {
+                    this.animationController.triggerDeath();
+                  }
                   this.callbacks.onDamageNumber({
                     id: Math.random().toString(),
                     amount: Math.round(dmg),
@@ -2107,6 +1973,14 @@ export class ThreeEngine {
         } else {
           enemy.state = "idle";
         }
+      }
+    });
+
+    // 5. Update Living NPC Animations & Head Tracking (Req 64-67)
+    this.npcs.forEach((npc) => {
+      const npcCtrl = this.animRegistry.getNPC(npc.id);
+      if (npcCtrl && this.animRegistry.shouldUpdateEntity(npc.pos.distanceTo(this.playerPos))) {
+        npcCtrl.update(delta, npc.mesh, this.playerPos);
       }
     });
 
@@ -2237,7 +2111,8 @@ export class ThreeEngine {
         foundPrompt = `Press [E] to talk to ${npc.name}`;
         action = () => {
           this.callbacks.onInteractPrompt(null);
-          // Dispatch custom event for React to open Dialogue
+          // Set living NPC interaction & smooth turn toward player (Req 66, 67)
+          this.animRegistry.getNPC(npc.id)?.setInteracting(true, this.playerPos, npc.pos);
           window.dispatchEvent(new CustomEvent("open_npc_dialogue", { detail: npc.id }));
         };
         break;
@@ -2347,6 +2222,12 @@ export class ThreeEngine {
   public playEmote(emote: EmoteType) {
     this.activeEmote = emote;
     this.emoteTimer = 4.0;
+    if (emote === "wave") this.animationController.requestState("EMOTE_WAVE");
+    else if (emote === "sit") this.animationController.requestState("EMOTE_SIT");
+    else if (emote === "dance") this.animationController.requestState("EMOTE_DANCE");
+    else if (emote === "victory") this.animationController.requestState("EMOTE_VICTORY");
+    else if (emote === "bow") this.animationController.requestState("EMOTE_BOW");
+
     if (emote === "victory") {
       this.spawnParticleBurst(this.playerPos, "#facc15", 30);
       audio.playLevelUp();
@@ -2355,11 +2236,12 @@ export class ThreeEngine {
     }
   }
 
-  // Photography Mode
+  // Photography Mode (Req 70-73)
   public setPhotoMode(enabled: boolean) {
     this.isPhotoMode = enabled;
+    this.cameraController.setPhotoMode(enabled);
     if (!enabled) {
-      this.camera.fov = 58;
+      this.camera.fov = this.controlConfig.cameraNormalFov;
       this.camera.updateProjectionMatrix();
     }
   }
@@ -2369,6 +2251,7 @@ export class ThreeEngine {
     this.photoDistance = distance;
     this.photoHeightOffset = heightOffset;
     this.photoYawDelta = yawDelta;
+    this.cameraController.setPhotoParams(distance, heightOffset);
     this.camera.fov = fov;
     this.camera.updateProjectionMatrix();
   }
@@ -2384,8 +2267,27 @@ export class ThreeEngine {
     this.godMode = enabled;
   }
 
-  // Developer Debug & Performance Monitoring
+  // Control Context Management (Req 51, 52)
+  public setInputContext(context: InputContext) {
+    this.inputManager.setContext(context);
+  }
+
+  public setCameraSensitivity(sens: number) {
+    this.cameraController.setSensitivity(sens);
+  }
+
+  public getControlConfig(): ControlConfig {
+    return { ...this.controlConfig };
+  }
+
+  public updateControlConfig(partial: Partial<ControlConfig>) {
+    Object.assign(this.controlConfig, partial);
+  }
+
+  // Developer Debug & Control Performance Monitoring (Req 74)
   public getDebugStats(): DebugStats {
+    const vel = this.movementController ? this.movementController.getVelocity() : new THREE.Vector3();
+    const axes = this.inputManager ? this.inputManager.getMovementAxes() : { inputForward: 0, inputRight: 0 };
     return {
       fps: this.fpsCounter,
       frameTimeMs: this.frameTimeCounter,
@@ -2397,7 +2299,37 @@ export class ThreeEngine {
       playerZ: Math.round(this.playerPos.z * 10) / 10,
       timeString: this.currentTimeString,
       weather: this.currentWeatherName,
+      // Control & Physics Diagnostics (Req 74)
+      keysPressed: this.inputManager ? this.inputManager.getRawKeysPressed() : {},
+      cameraYawDeg: this.cameraController ? this.cameraController.getYawDegrees() : 0,
+      cameraPitchDeg: this.cameraController ? this.cameraController.getPitchDegrees() : 0,
+      playerVelocity: [
+        Math.round(vel.x * 100) / 100,
+        Math.round(vel.y * 100) / 100,
+        Math.round(vel.z * 100) / 100,
+      ],
+      movementVector: [axes.inputRight, axes.inputForward],
+      isGrounded: this.movementController ? this.movementController.isGroundedState() : this.isGrounded,
+      isSprinting: this.movementController ? this.movementController.isSprintActive() : this.isSprinting,
+      currentSpeed: Math.round(Math.hypot(vel.x, vel.z) * 10) / 10,
+      inputContext: this.inputManager ? this.inputManager.getContext() : "GAMEPLAY",
+      animState: this.animationController ? this.animationController.stateMachine.getCurrentState() : this.animState,
+      pointerLocked: this.inputManager ? this.inputManager.getPointerLockState() : false,
+      animDebugData: this.animationController ? this.animationController.getDebugData() : undefined,
     };
+  }
+
+  // Animation Debug & Developer Test Mode (Req 97 & 98)
+  public getAnimationDebugData(): AnimationDebugData {
+    return this.animationController.getDebugData();
+  }
+
+  public setAnimationTestMode(active: boolean, state?: AnimationState) {
+    this.animationController.setTestMode(active, state);
+  }
+
+  public setAnimationScrubTime(time: number) {
+    this.animationController.setTestTimeScrub(time);
   }
 
   public spawnDebugEnemy(type: "stalker" | "automaton" | "boss") {
@@ -2538,6 +2470,9 @@ export class ThreeEngine {
   public dispose() {
     if (this.reqId) {
       cancelAnimationFrame(this.reqId);
+    }
+    if (this.inputManager) {
+      this.inputManager.destroy();
     }
     this.renderer.dispose();
     if (this.renderer.domElement.parentElement) {

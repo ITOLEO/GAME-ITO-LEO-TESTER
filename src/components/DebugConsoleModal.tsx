@@ -30,6 +30,9 @@ interface DebugConsoleModalProps {
   onSetWeatherPreset: (weather: "Clear" | "Rain" | "Windstorm" | "Aether Fog" | "Aurora") => void;
   onLevelUpActive: () => void;
   onCompleteActiveQuest: () => void;
+  onToggleInputOverlay?: () => void;
+  isInputOverlayActive?: boolean;
+  onOpenAnimationDebugger?: () => void;
 }
 
 export const DebugConsoleModal: React.FC<DebugConsoleModalProps> = ({
@@ -44,6 +47,9 @@ export const DebugConsoleModal: React.FC<DebugConsoleModalProps> = ({
   onSetWeatherPreset,
   onLevelUpActive,
   onCompleteActiveQuest,
+  onToggleInputOverlay,
+  isInputOverlayActive,
+  onOpenAnimationDebugger,
 }) => {
   const [stats, setStats] = useState<DebugStats>(getDebugStats());
   const [godModeActive, setGodModeActive] = useState(false);
@@ -128,6 +134,73 @@ export const DebugConsoleModal: React.FC<DebugConsoleModalProps> = ({
                 <span className="text-xs font-bold text-amber-300">
                   {stats.playerX}, {stats.playerZ}
                 </span>
+              </div>
+            </div>
+          </div>
+
+          {/* 1.5 Control & Movement Diagnostics (Req 74) */}
+          <div className="bg-neutral-900/80 border border-neutral-800 rounded-xl p-4">
+            <div className="flex items-center justify-between mb-3">
+              <div className="flex items-center gap-2 text-xs font-mono text-cyan-400 uppercase tracking-wider">
+                <ShieldAlert className="w-4 h-4" />
+                <span>Controls & Physics Diagnostics (Req 74)</span>
+              </div>
+              <div className="flex items-center gap-2">
+                {onOpenAnimationDebugger && (
+                  <button
+                    onClick={onOpenAnimationDebugger}
+                    className="px-2.5 py-1 rounded-lg text-xs font-mono bg-amber-500/20 text-amber-300 border border-amber-500/40 hover:bg-amber-500/30 transition-colors"
+                  >
+                    Animation Suite (F4)
+                  </button>
+                )}
+                {onToggleInputOverlay && (
+                  <button
+                    onClick={onToggleInputOverlay}
+                    className={`px-2.5 py-1 rounded-lg text-xs font-mono transition-colors ${
+                      isInputOverlayActive
+                        ? "bg-cyan-500 text-neutral-950 font-bold"
+                        : "bg-neutral-800 text-neutral-300 hover:bg-neutral-700"
+                    }`}
+                  >
+                    {isInputOverlayActive ? "Hide HUD Overlay" : "Show HUD Overlay"}
+                  </button>
+                )}
+              </div>
+            </div>
+
+            <div className="grid grid-cols-2 sm:grid-cols-4 md:grid-cols-6 gap-3 font-mono text-center text-xs">
+              <div className="bg-neutral-950/80 p-2.5 rounded-lg border border-neutral-800">
+                <span className="text-[10px] text-neutral-500 block uppercase">Camera Yaw</span>
+                <span className="text-sm font-bold text-cyan-300">{stats.cameraYawDeg ?? 0}°</span>
+              </div>
+              <div className="bg-neutral-950/80 p-2.5 rounded-lg border border-neutral-800">
+                <span className="text-[10px] text-neutral-500 block uppercase">Camera Pitch</span>
+                <span className="text-sm font-bold text-cyan-300">{stats.cameraPitchDeg ?? 0}°</span>
+              </div>
+              <div className="bg-neutral-950/80 p-2.5 rounded-lg border border-neutral-800">
+                <span className="text-[10px] text-neutral-500 block uppercase">Velocity (X,Z)</span>
+                <span className="text-sm font-bold text-neutral-200">
+                  {stats.playerVelocity ? `${stats.playerVelocity[0]}, ${stats.playerVelocity[2]}` : "0, 0"}
+                </span>
+              </div>
+              <div className="bg-neutral-950/80 p-2.5 rounded-lg border border-neutral-800">
+                <span className="text-[10px] text-neutral-500 block uppercase">Planar Speed</span>
+                <span className="text-sm font-bold text-emerald-300">{stats.currentSpeed ?? 0} m/s</span>
+              </div>
+              <div className="bg-neutral-950/80 p-2.5 rounded-lg border border-neutral-800">
+                <span className="text-[10px] text-neutral-500 block uppercase">Grounded</span>
+                <span
+                  className={`text-sm font-bold ${
+                    stats.isGrounded ? "text-emerald-400" : "text-amber-400"
+                  }`}
+                >
+                  {stats.isGrounded ? "YES" : "AIRBORNE"}
+                </span>
+              </div>
+              <div className="bg-neutral-950/80 p-2.5 rounded-lg border border-neutral-800">
+                <span className="text-[10px] text-neutral-500 block uppercase">Input Context</span>
+                <span className="text-xs font-bold text-purple-300">{stats.inputContext ?? "GAMEPLAY"}</span>
               </div>
             </div>
           </div>

@@ -1,0 +1,7 @@
+{
+  "name": "Aetheria: Resonant Horizon",
+  "description": "Original 3D anime open-world action RPG featuring real-time combat, aether elemental reactions, deep character progression, quests, dungeons, and world exploration.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
+

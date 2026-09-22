@@ -25,25 +25,50 @@ export class WeaponVisualBuilder {
     const accentColor = new THREE.Color(accentColorHex);
 
     switch (weaponType) {
-      case "Greatsword":
+      case WeaponType.GREATSWORD:
         this.buildGreatsword(group, accentColor);
         break;
-      case "Spear":
+      case WeaponType.SPEAR:
         this.buildSpear(group, accentColor);
         break;
-      case "Catalyst":
+      case WeaponType.CATALYST:
         this.buildCatalyst(group, accentColor);
         break;
-      case "Bow":
-        this.buildBow(group, accentColor);
+      case WeaponType.DUAL_BLADES:
+        this.buildDualBlades(group, accentColor);
         break;
-      case "Sword":
+      case WeaponType.SWORD:
       default:
         this.buildSword(group, accentColor);
         break;
     }
 
     return group;
+  }
+
+  /**
+   * Dual Blades (Twin crescent energy daggers)
+   */
+  private buildDualBlades(group: THREE.Group, accentColor: THREE.Color) {
+    const bladeMat = new THREE.MeshStandardMaterial({
+      color: 0xffffff,
+      emissive: accentColor,
+      emissiveIntensity: 0.45,
+      roughness: 0.2,
+      metalness: 0.8,
+    });
+    const goldMat = this.materials.getGoldTrimMaterial();
+
+    for (const offset of [-0.14, 0.14]) {
+      const blade = new THREE.Mesh(new THREE.BoxGeometry(0.04, 0.75, 0.12), bladeMat);
+      blade.position.set(offset, 0.45, 0);
+      blade.rotation.z = offset > 0 ? 0.15 : -0.15;
+      group.add(blade);
+
+      const hilt = new THREE.Mesh(new THREE.CylinderGeometry(0.025, 0.025, 0.22, 6), goldMat);
+      hilt.position.set(offset, 0.05, 0);
+      group.add(hilt);
+    }
   }
 
   /**

@@ -21,6 +21,7 @@ import { MovementController } from "./controls/movementController";
 import { AnimationRegistry } from "./animation/AnimationRegistry";
 import { AnimationController } from "./animation/AnimationController";
 import { BossAnimationController } from "./animation/BossAnimationController";
+import { AnimeModelParts } from "./animation/PlayerAnimationRig";
 import { AnimationDebugData, AnimationState } from "./animation/animationTypes";
 import { EnvironmentBuilder } from "./visuals/environmentBuilder";
 import { VegetationSystem } from "./visuals/vegetationSystem";
@@ -92,29 +93,7 @@ export class ThreeEngine {
 
   // Player
   private playerGroup: THREE.Group;
-  private playerModel: {
-    root: THREE.Group;
-    body: THREE.Mesh;
-    head: THREE.Mesh;
-    hair: THREE.Group;
-    eyes: THREE.Mesh;
-    cape: THREE.Mesh;
-    leftArm: THREE.Group;
-    rightArm: THREE.Group;
-    leftLeg: THREE.Group;
-    rightLeg: THREE.Group;
-    weapon: THREE.Group;
-    slashArc: THREE.Mesh;
-    sockets: {
-      head: THREE.Group;
-      chest: THREE.Group;
-      back: THREE.Group;
-      hip: THREE.Group;
-      leftHand: THREE.Group;
-      rightHand: THREE.Group;
-      foot: THREE.Group;
-    };
-  };
+  private playerModel: AnimeModelParts;
   private playerPos = new THREE.Vector3(0, 0, 0);
   private playerVelocity = new THREE.Vector3();
   private playerRotation = 0;
@@ -150,6 +129,7 @@ export class ThreeEngine {
   public bossAnimationController!: BossAnimationController;
 
   // Master Modular Visual Upgrade Architecture
+  private waterSystem = new WaterSystem();
   private waterSystemUpdater?: (time: number) => void;
   private environmentBuilder = new EnvironmentBuilder();
   private vegetationSystem = new VegetationSystem();
@@ -688,187 +668,9 @@ export class ThreeEngine {
     this.scene.add(this.atmosphericRain);
   }
 
-  // Stylized anime character mesh builder with modular Sockets (Req 63)
-  private buildAnimeCharacter(char: PlayableCharacter) {
-    const root = new THREE.Group();
-
-    // Body material (jacket/tunic)
-    const bodyMat = new THREE.MeshStandardMaterial({
-      color: char.accentColor,
-      roughness: 0.6,
-    });
-    // Skin material
-    const skinMat = new THREE.MeshStandardMaterial({
-      color: 0xffdfc4,
-      roughness: 0.8,
-    });
-    // Hair material
-    const hairMat = new THREE.MeshStandardMaterial({
-      color: char.avatarColor,
-      roughness: 0.5,
-    });
-
-    // 1. Torso
-    const bodyGeo = new THREE.CylinderGeometry(0.38, 0.32, 1.0, 8);
-    const body = new THREE.Mesh(bodyGeo, bodyMat);
-    body.position.y = 1.35;
-    body.castShadow = true;
-    root.add(body);
-
-    // 2. Head
-    const headGeo = new THREE.SphereGeometry(0.36, 16, 16);
-    const head = new THREE.Mesh(headGeo, skinMat);
-    head.position.y = 2.05;
-    head.castShadow = true;
-    root.add(head);
-
-    // 3. Anime Eyes
-    const eyeGeo = new THREE.PlaneGeometry(0.12, 0.08);
-    const eyeMat = new THREE.MeshBasicMaterial({ color: 0x0f172a });
-    const leftEye = new THREE.Mesh(eyeGeo, eyeMat);
-    leftEye.position.set(-0.12, 2.08, 0.35);
-    const rightEye = new THREE.Mesh(eyeGeo, eyeMat);
-    rightEye.position.set(0.12, 2.08, 0.35);
-    root.add(leftEye, rightEye);
-
-    // 4. Stylized Anime Hair (layered spiky cones)
-    const hair = new THREE.Group();
-    for (let h = 0; h < 7; h++) {
-      const spike = new THREE.Mesh(new THREE.ConeGeometry(0.18, 0.55, 5), hairMat);
-      spike.position.set(
-        Math.sin(h * 1.0) * 0.26,
-        2.32 + Math.cos(h * 0.8) * 0.08,
-        Math.cos(h * 1.0) * 0.2 - 0.05
-      );
-      spike.rotation.x = -0.3 + (Math.random() - 0.5) * 0.4;
-      spike.rotation.z = (h - 3) * 0.3;
-      hair.add(spike);
-    }
-    root.add(hair);
-
-    // 5. Flowing Cape / Scarf
-    const capeGeo = new THREE.PlaneGeometry(0.65, 1.1);
-    const capeMat = new THREE.MeshStandardMaterial({
-      color: char.avatarColor,
-      side: THREE.DoubleSide,
-      roughness: 0.8,
-    });
-    const cape = new THREE.Mesh(capeGeo, capeMat);
-    cape.position.set(0, 1.3, -0.38);
-    cape.rotation.x = 0.2;
-    root.add(cape);
-
-    // 6. Arms
-    const armMat = new THREE.MeshStandardMaterial({ color: char.accentColor, roughness: 0.7 });
-    const leftArm = new THREE.Group();
-    const lMesh = new THREE.Mesh(new THREE.CylinderGeometry(0.12, 0.1, 0.75), armMat);
-    lMesh.position.y = -0.35;
-    leftArm.add(lMesh);
-    leftArm.position.set(-0.52, 1.7, 0);
-    root.add(leftArm);
-
-    const rightArm = new THREE.Group();
-    const rMesh = new THREE.Mesh(new THREE.CylinderGeometry(0.12, 0.1, 0.75), armMat);
-    rMesh.position.y = -0.35;
-    rightArm.add(rMesh);
-    rightArm.position.set(0.52, 1.7, 0);
-    root.add(rightArm);
-
-    // 7. Legs
-    const legMat = new THREE.MeshStandardMaterial({ color: 0x1e293b, roughness: 0.8 });
-    const leftLeg = new THREE.Group();
-    const llMesh = new THREE.Mesh(new THREE.CylinderGeometry(0.14, 0.11, 0.85), legMat);
-    llMesh.position.y = -0.42;
-    leftLeg.add(llMesh);
-    leftLeg.position.set(-0.2, 0.85, 0);
-    root.add(leftLeg);
-
-    const rightLeg = new THREE.Group();
-    const rlMesh = new THREE.Mesh(new THREE.CylinderGeometry(0.14, 0.11, 0.85), legMat);
-    rlMesh.position.y = -0.42;
-    rightLeg.add(rlMesh);
-    rightLeg.position.set(0.2, 0.85, 0);
-    root.add(rightLeg);
-
-    // 8. Sockets System (Req 63: head, chest, back, hip, leftHand, rightHand, foot)
-    const sockets = {
-      head: new THREE.Group(),
-      chest: new THREE.Group(),
-      back: new THREE.Group(),
-      hip: new THREE.Group(),
-      leftHand: new THREE.Group(),
-      rightHand: new THREE.Group(),
-      foot: new THREE.Group(),
-    };
-
-    head.add(sockets.head);
-    body.add(sockets.chest);
-    body.add(sockets.back);
-    sockets.back.position.set(0, 0.1, -0.32);
-    body.add(sockets.hip);
-    sockets.hip.position.set(0.32, -0.35, 0);
-    leftArm.add(sockets.leftHand);
-    sockets.leftHand.position.set(0, -0.7, 0.15);
-    rightArm.add(sockets.rightHand);
-    sockets.rightHand.position.set(0, -0.7, 0.15);
-    leftLeg.add(sockets.foot);
-    sockets.foot.position.set(0, -0.85, 0.1);
-
-    // 9. Glowing Elemental Weapon - attached to rightHand socket
-    const weapon = new THREE.Group();
-    const bladeMat = new THREE.MeshStandardMaterial({
-      color: 0xffffff,
-      emissive: char.accentColor,
-      emissiveIntensity: 0.9,
-      roughness: 0.2,
-      metalness: 0.8,
-    });
-    const bladeGeo = new THREE.BoxGeometry(0.08, 1.25, 0.22);
-    const blade = new THREE.Mesh(bladeGeo, bladeMat);
-    blade.position.y = 0.55;
-    blade.castShadow = true;
-    weapon.add(blade);
-
-    // Guard & Hilt
-    const hilt = new THREE.Mesh(
-      new THREE.CylinderGeometry(0.06, 0.06, 0.35),
-      new THREE.MeshStandardMaterial({ color: 0x475569 })
-    );
-    hilt.position.y = -0.15;
-    weapon.add(hilt);
-
-    weapon.position.set(0, 0, 0.1);
-    weapon.rotation.x = Math.PI / 4;
-    sockets.rightHand.add(weapon);
-
-    // 10. Slash Arc Effect (Crescent curve)
-    const arcGeo = new THREE.RingGeometry(1.2, 1.8, 16, 1, 0, Math.PI * 0.7);
-    const arcMat = new THREE.MeshBasicMaterial({
-      color: char.accentColor,
-      side: THREE.DoubleSide,
-      transparent: true,
-      opacity: 0,
-    });
-    const slashArc = new THREE.Mesh(arcGeo, arcMat);
-    slashArc.position.set(0, 1.3, 0.6);
-    slashArc.rotation.x = -Math.PI / 2;
-    root.add(slashArc);
-
-    return {
-      root,
-      body,
-      head,
-      hair,
-      eyes: leftEye,
-      cape,
-      leftArm,
-      rightArm,
-      leftLeg,
-      rightLeg,
-      weapon,
-      slashArc,
-      sockets,
-    };
+  // Stylized anime character mesh builder with modular Sockets, Outlines & Weapons (Req 63)
+  private buildAnimeCharacter(char: PlayableCharacter): AnimeModelParts {
+    return this.characterVisualBuilder.buildCharacter(char);
   }
 
   // Socket system weapon attachment (Req 63)
@@ -926,7 +728,7 @@ export class ThreeEngine {
     this.animationController.setWeaponType(char.weaponType);
   }
 
-  // Spawn NPCs with interactive indicators
+  // Spawn NPCs with interactive indicators and distinctive visual gear
   private spawnNPCs() {
     const npcDefs = [
       { id: "thorne", name: "Elder Thorne", role: "Sunvale Elder", pos: new THREE.Vector3(0, 0, -10), color: 0x3b82f6 },
@@ -936,33 +738,25 @@ export class ThreeEngine {
     ];
 
     npcDefs.forEach((def) => {
-      const g = new THREE.Group();
-      const body = new THREE.Mesh(
-        new THREE.CylinderGeometry(0.38, 0.45, 1.6),
-        new THREE.MeshStandardMaterial({ color: def.color, roughness: 0.7 })
-      );
-      body.position.y = 0.8;
-      body.castShadow = true;
-      g.add(body);
-
-      const head = new THREE.Mesh(
-        new THREE.SphereGeometry(0.32, 12, 12),
-        new THREE.MeshStandardMaterial({ color: 0xffdfc4 })
-      );
-      head.position.y = 1.8;
-      g.add(head);
-
-      // Floating interactive prompt diamond
-      const icon = new THREE.Mesh(
-        new THREE.OctahedronGeometry(0.25),
-        new THREE.MeshBasicMaterial({ color: 0xfacc15 })
-      );
-      icon.position.y = 2.5;
-      g.add(icon);
+      let g: THREE.Group;
+      if (def.id === "thorne") {
+        g = this.entityVisualBuilder.buildElderThorne();
+      } else if (def.id === "seraphina") {
+        g = this.entityVisualBuilder.buildSeraphina();
+      } else if (def.id === "gerald") {
+        g = this.entityVisualBuilder.buildGerald();
+      } else if (def.id === "sylas") {
+        g = this.entityVisualBuilder.buildSylas();
+      } else {
+        g = new THREE.Group();
+      }
 
       const y = this.terrainHeightMap(def.pos.x, def.pos.z);
       g.position.set(def.pos.x, y, def.pos.z);
       this.scene.add(g);
+
+      // Register collision for NPCs so player cannot walk straight through them
+      this.collisionSystem.addCylinderCollider(`npc_${def.id}`, def.pos.x, def.pos.z, 0.65, y, y + 2.2);
 
       this.npcs.push({
         id: def.id,
@@ -1172,27 +966,7 @@ export class ThreeEngine {
     ];
 
     stalkerSpawns.forEach(([sx, sz], idx) => {
-      const g = new THREE.Group();
-      // Anime wolf/beast body
-      const bodyMat = new THREE.MeshStandardMaterial({ color: 0x1e1b4b, roughness: 0.6 });
-      const body = new THREE.Mesh(new THREE.BoxGeometry(1.0, 0.7, 1.8), bodyMat);
-      body.position.y = 0.65;
-      body.castShadow = true;
-      g.add(body);
-
-      // Glowing aether horn
-      const hornMat = new THREE.MeshBasicMaterial({ color: 0x38bdf8 });
-      const horn = new THREE.Mesh(new THREE.ConeGeometry(0.18, 0.7, 5), hornMat);
-      horn.position.set(0, 1.25, 0.7);
-      horn.rotation.x = 0.5;
-      g.add(horn);
-
-      // Tail with secondary spring wag
-      const tail = new THREE.Mesh(new THREE.ConeGeometry(0.12, 0.9, 4), bodyMat);
-      tail.position.set(0, 0.7, -0.9);
-      tail.rotation.x = -Math.PI * 0.35;
-      g.add(tail);
-
+      const { root: g, tail } = this.entityVisualBuilder.buildAetherlingStalker();
       const sy = this.terrainHeightMap(sx, sz);
       g.position.set(sx, sy, sz);
       this.scene.add(g);
@@ -1226,19 +1000,12 @@ export class ThreeEngine {
     const rvx = 72;
     const rvz = -42;
     const rvy = this.terrainHeightMap(rvx, rvz);
-    const rvGroup = new THREE.Group();
-    const vanguardMat = new THREE.MeshStandardMaterial({ color: 0x475569, metalness: 0.6, roughness: 0.4 });
-    const vgTorso = new THREE.Mesh(new THREE.BoxGeometry(1.6, 2.2, 1.2), vanguardMat);
-    vgTorso.position.y = 2.0;
-    vgTorso.castShadow = true;
-    rvGroup.add(vgTorso);
-
-    const vgEye = new THREE.Mesh(new THREE.SphereGeometry(0.3, 8, 8), new THREE.MeshBasicMaterial({ color: 0xef4444 }));
-    vgEye.position.set(0, 2.3, 0.65);
-    rvGroup.add(vgEye);
-
+    const rvGroup = this.entityVisualBuilder.buildRuinVanguard();
     rvGroup.position.set(rvx, rvy, rvz);
     this.scene.add(rvGroup);
+
+    // Register collision for Vanguard
+    this.collisionSystem.addCylinderCollider("vanguard_01_body", rvx, rvz, 1.4, rvy, rvy + 4.0);
 
     this.animRegistry.registerMonster("vanguard_01", "vanguard");
 
@@ -1266,52 +1033,16 @@ export class ThreeEngine {
     const bx = -65;
     const bz = 60;
     const by = this.terrainHeightMap(bx, bz);
-    const bossGroup = new THREE.Group();
+    const { root: bossGroup, torso: bTorso, head: bHead, core: bCore, fists: bossFists } =
+      this.entityVisualBuilder.buildIgnisTitan();
 
-    const titanRockMat = new THREE.MeshStandardMaterial({ color: 0x18181b, roughness: 0.9, flatShading: true });
-    const titanMagmaMat = new THREE.MeshStandardMaterial({
-      color: 0xef4444,
-      emissive: 0xf97316,
-      emissiveIntensity: 1.5,
-      roughness: 0.3,
-    });
-
-    const bTorso = new THREE.Mesh(new THREE.BoxGeometry(3.6, 4.5, 2.8), titanRockMat);
-    bTorso.position.y = 4.5;
-    bTorso.castShadow = true;
-    bossGroup.add(bTorso);
-
-    // Glowing Magma Core
-    const bCore = new THREE.Mesh(new THREE.OctahedronGeometry(1.4, 1), titanMagmaMat);
-    bCore.position.set(0, 4.6, 1.4);
-    bossGroup.add(bCore);
-
-    // Titan Head & Crown Horns
-    const bHead = new THREE.Mesh(new THREE.BoxGeometry(2.0, 1.8, 1.8), titanRockMat);
-    bHead.position.set(0, 7.5, 0.4);
-    bHead.castShadow = true;
-    bossGroup.add(bHead);
-
-    for (const hx of [-1.2, 1.2]) {
-      const bHorn = new THREE.Mesh(new THREE.ConeGeometry(0.45, 2.2, 5), titanMagmaMat);
-      bHorn.position.set(hx, 8.8, 0.4);
-      bHorn.rotation.z = -hx * 0.4;
-      bossGroup.add(bHorn);
-    }
-
-    // Heavy Stone Fists
-    const bossFists: THREE.Mesh[] = [];
-    for (const fx of [-3.2, 3.2]) {
-      const bFist = new THREE.Mesh(new THREE.BoxGeometry(1.6, 2.4, 1.6), titanRockMat);
-      bFist.position.set(fx, 3.5, 0.5);
-      bFist.castShadow = true;
-      bossGroup.add(bFist);
-      bossFists.push(bFist);
-    }
     this.bossAnimationController.setParts(bTorso, bHead, bCore, bossFists);
 
     bossGroup.position.set(bx, by, bz);
     this.scene.add(bossGroup);
+
+    // Register collision for Boss Colossus
+    this.collisionSystem.addCylinderCollider("boss_titan_body", bx, bz, 3.2, by, by + 10.0);
 
     this.enemies.push({
       id: "boss_titan",
@@ -2065,13 +1796,16 @@ export class ThreeEngine {
       audio.setBgmState("exploration");
     }
 
-    // 7. Rotating Objects (Windmill, Monolith)
+    // 7. Rotating Objects (Windmill, Monolith) & Water Surface Animation
     if ((this as any).windmillBlades) {
       (this as any).windmillBlades.rotation.z -= delta * 0.8;
     }
     if ((this as any).floatingMonolith) {
       (this as any).floatingMonolith.rotation.y += delta * 0.5;
       (this as any).floatingMonolith.position.y = 6 + Math.sin(animTime * 0.8) * 0.4;
+    }
+    if (this.waterSystemUpdater) {
+      this.waterSystemUpdater(animTime);
     }
 
     // 8. Stats update callback
